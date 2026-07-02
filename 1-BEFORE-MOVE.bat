@@ -13,6 +13,7 @@ echo ty seychas uezzhaesh.
 echo.
 echo On:
 echo - obnovit nastroyki i lokalnye dannye
+echo - pri povtornom zapuske obnovit tolko novoe i izmenennoe
 echo - sohranit naydennye nastroyki, dostupy, instrumenty i privatnye faily
 echo - sdelayet snimki rabochih repo dlya tochnogo pereezda
 echo - soberet perenosimyj komplekt dlya fleshki ili pochty
@@ -33,11 +34,13 @@ echo Codex i VS Code zakryty. Mozhno sobirat komplekt.
 echo.
 set /p ARCHIVE_PASSWORD=Esli nuzhen zashchishchennyj arhiv, vvedi parol (ili prosto Enter): 
 echo.
+set "REFRESH_MODE=Auto"
+if not "%CODEXKIT_REFRESH_MODE%"=="" set "REFRESH_MODE=%CODEXKIT_REFRESH_MODE%"
 
 if "%ARCHIVE_PASSWORD%"=="" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -RefreshMode "%REFRESH_MODE%"
 ) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -ArchivePassword "%ARCHIVE_PASSWORD%"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -ArchivePassword "%ARCHIVE_PASSWORD%" -RefreshMode "%REFRESH_MODE%"
 )
 
 set "EXITCODE=%ERRORLEVEL%"

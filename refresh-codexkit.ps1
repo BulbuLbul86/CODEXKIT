@@ -1,6 +1,8 @@
 ﻿param(
     [string]$KitRoot = (Split-Path -Parent $PSCommandPath),
-    [string]$ArchivePassword
+    [string]$ArchivePassword,
+    [ValidateSet("Auto", "Full", "Incremental")]
+    [string]$RefreshMode = "Auto"
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,11 +42,16 @@ function Clear-Dir {
 function Copy-FileIfExists {
     param(
         [string]$Source,
-        [string]$Destination
+        [string]$Destination,
+        [switch]$Incremental
     )
 
     if (-not (Test-Path -LiteralPath $Source)) {
         return $false
+    }
+
+    if ($Incremental -and -not (Test-FileCopyRequired -Source $Source -Destination $Destination)) {
+        return $true
     }
 
     Ensure-Dir -Path (Split-Path -Parent $Destination)
@@ -69,6 +76,27 @@ function Get-FileSha256 {
     }
 }
 
+function Test-FileCopyRequired {
+    param(
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if (-not (Test-Path -LiteralPath $Destination -PathType Leaf)) {
+        return $true
+    }
+
+    $sourceItem = Get-Item -LiteralPath $Source -Force
+    $destinationItem = Get-Item -LiteralPath $Destination -Force
+
+    if ([int64]$sourceItem.Length -ne [int64]$destinationItem.Length) {
+        return $true
+    }
+
+    $timeDeltaSeconds = [Math]::Abs(($sourceItem.LastWriteTimeUtc - $destinationItem.LastWriteTimeUtc).TotalSeconds)
+    return ($timeDeltaSeconds -gt 2)
+}
+
 function Copy-DirIfExists {
     param(
         [string]$Source,
@@ -80,7 +108,7 @@ function Copy-DirIfExists {
     }
 
     Ensure-Dir -Path $Destination
-    robocopy $Source $Destination /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $Source $Destination /E /XJ /FFT /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy failed for $Source -> $Destination with exit code $LASTEXITCODE"
     }
@@ -107,6 +135,7 @@ function Copy-DirWithExclusions {
         $Destination,
         "/E",
         "/XJ",
+        "/FFT",
         "/R:1",
         "/W:1",
         "/NFL",
@@ -959,6 +988,69 @@ function Discover-RepoManifestEntries {
     return $repos
 }
 
+function Get-RepoSourceKey {
+    param([object]$Repo)
+
+    $sourcePath = [string]$Repo.source_path
+    if ([string]::IsNullOrWhiteSpace($sourcePath)) {
+        return $null
+    }
+
+    return (($sourcePath -replace '[\\/]+$', '').ToLowerInvariant())
+}
+
+function Merge-RepoManifestEntries {
+    param(
+        [object[]]$ExistingRepos,
+        [object[]]$DiscoveredRepos
+    )
+
+    $merged = New-Object System.Collections.Generic.List[object]
+    $seenSourcePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    $seenNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($repo in @($ExistingRepos)) {
+        if ($null -eq $repo) {
+            continue
+        }
+
+        $sourceKey = Get-RepoSourceKey -Repo $repo
+        if ($sourceKey) {
+            $seenSourcePaths.Add($sourceKey) | Out-Null
+        }
+
+        $name = [string]$repo.name
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $seenNames.Add($name) | Out-Null
+        }
+
+        $merged.Add($repo) | Out-Null
+    }
+
+    foreach ($repo in @($DiscoveredRepos)) {
+        if ($null -eq $repo) {
+            continue
+        }
+
+        $sourceKey = Get-RepoSourceKey -Repo $repo
+        $name = [string]$repo.name
+        if (($sourceKey -and $seenSourcePaths.Contains($sourceKey)) -or (-not [string]::IsNullOrWhiteSpace($name) -and $seenNames.Contains($name))) {
+            continue
+        }
+
+        if ($sourceKey) {
+            $seenSourcePaths.Add($sourceKey) | Out-Null
+        }
+        if (-not [string]::IsNullOrWhiteSpace($name)) {
+            $seenNames.Add($name) | Out-Null
+        }
+
+        $merged.Add($repo) | Out-Null
+    }
+
+    return @($merged.ToArray())
+}
+
 function Get-RepoManifestEntries {
     param(
         [string]$RepoManifestPath,
@@ -966,12 +1058,10 @@ function Get-RepoManifestEntries {
         [string[]]$ExcludedPathPrefixes
     )
 
+    $existingRepos = @()
     if (Test-Path -LiteralPath $RepoManifestPath) {
         try {
             $existingRepos = @(Get-Content -LiteralPath $RepoManifestPath -Raw | ConvertFrom-Json)
-            if ($existingRepos.Count -gt 0) {
-                return $existingRepos
-            }
         } catch {
             Write-Warning "Could not read repo-manifest.json: $($_.Exception.Message)"
         }
@@ -979,8 +1069,9 @@ function Get-RepoManifestEntries {
 
     Write-Step "Discovering work repository snapshots"
     $discoveredRepos = @(Discover-RepoManifestEntries -Roots $Roots -ExcludedPathPrefixes $ExcludedPathPrefixes)
-    $discoveredRepos | ConvertTo-Json -Depth 4 | Set-Content -Path $RepoManifestPath -Encoding UTF8
-    return $discoveredRepos
+    $mergedRepos = @(Merge-RepoManifestEntries -ExistingRepos $existingRepos -DiscoveredRepos $discoveredRepos)
+    $mergedRepos | ConvertTo-Json -Depth 4 | Set-Content -Path $RepoManifestPath -Encoding UTF8
+    return $mergedRepos
 }
 
 function ConvertTo-IndexText {
@@ -1379,9 +1470,22 @@ $configuredCopyEntries = Get-ConfiguredCopyEntries -Config $customPathsConfig -S
 $detectedEnvironmentEntries = Get-DetectedEnvironmentEntries -HomeDir $homeDir -AppDataDir $appDataDir -LocalAppDataDir $localAppDataDir -StateRoot $stateRoot
 $repoRoots = Get-ConfiguredRepoRoots -Config $customPathsConfig -HomeDir $homeDir -WorkspaceRoot $workspaceRoot
 
-Write-Step "Refreshing state folder"
-Clear-Dir -Path $stateRoot
-Clear-Dir -Path $repoSnapshotsRoot
+$hasExistingSnapshot = (Test-Path -LiteralPath $stateRoot) -or (Test-Path -LiteralPath $repoSnapshotsRoot)
+$effectiveRefreshMode = if ($RefreshMode -eq "Auto") {
+    if ($hasExistingSnapshot) { "Incremental" } else { "Full" }
+} else {
+    $RefreshMode
+}
+$incrementalRefresh = ($effectiveRefreshMode -eq "Incremental")
+
+Write-Step "Refreshing state folder ($effectiveRefreshMode mode)"
+if ($incrementalRefresh) {
+    Ensure-Dir -Path $stateRoot
+    Ensure-Dir -Path $repoSnapshotsRoot
+} else {
+    Clear-Dir -Path $stateRoot
+    Clear-Dir -Path $repoSnapshotsRoot
+}
 Ensure-Dir -Path $docsRoot
 
 Write-Step "Writing machine info"
@@ -1390,6 +1494,7 @@ $machineInfo = [pscustomobject]@{
     source_machine = $env:COMPUTERNAME
     source_user    = $env:USERNAME
     source_home    = $homeDir
+    refresh_mode   = $effectiveRefreshMode
 }
 $machineInfo | ConvertTo-Json -Depth 4 | Set-Content -Path $machineInfoPath -Encoding UTF8
 
@@ -1412,14 +1517,14 @@ foreach ($entry in $configuredCopyEntries.files) {
 }
 
 foreach ($entry in $copyFiles) {
-    $status = if (Copy-FileIfExists -Source $entry.Source -Destination $entry.Destination) { "copied" } else { "missing" }
+    $status = if (Copy-FileIfExists -Source $entry.Source -Destination $entry.Destination -Incremental:$incrementalRefresh) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category $entry.Category -Source $entry.Source -Destination $entry.Destination -Status $status
 }
 
 foreach ($fileName in $codexPersistentFiles) {
     $source = Join-Path $homeDir ".codex\$fileName"
     $destination = Join-Path $stateRoot "codex\$fileName"
-    $status = if (Copy-FileIfExists -Source $source -Destination $destination) { "copied" } else { "missing" }
+    $status = if (Copy-FileIfExists -Source $source -Destination $destination -Incremental:$incrementalRefresh) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status $status
 }
 
@@ -1526,6 +1631,8 @@ $environmentInventory = [pscustomobject]@{
     generated_at          = (Get-Date).ToString("o")
     source_machine        = $env:COMPUTERNAME
     source_user           = $env:USERNAME
+    requested_refresh_mode = $RefreshMode
+    refresh_mode          = $effectiveRefreshMode
     repo_search_roots     = @($repoRoots)
     repos_detected        = @($repoManifestEntries).Count
     auto_files_detected   = @($detectedEnvironmentEntries.files).Count
