@@ -2,91 +2,121 @@
   {
     "id": "Git.Git",
     "source": "winget",
+    "display_name": "Git",
     "install_by_default": true,
-    "notes": "Required for repository cloning and daily development."
+    "notes": "Version control and repository tools.",
+    "project_hint": "Needed for almost any code project, GitHub sync, branches, commits, and local repo recovery."
   },
   {
     "id": "Microsoft.VisualStudioCode",
     "source": "winget",
+    "display_name": "Visual Studio Code",
     "install_by_default": true,
-    "notes": "Primary editor restore target."
+    "notes": "Code editor used by many extensions and project workspaces.",
+    "project_hint": "Useful for editing web apps, Android support files, scripts, configs, and restored repositories."
   },
   {
     "id": "OpenAI.Codex",
     "source": "winget",
+    "display_name": "Codex CLI",
     "install_by_default": true,
-    "notes": "Codex CLI."
+    "notes": "Command-line Codex environment.",
+    "project_hint": "Useful when continuing coding tasks, repo fixes, automation work, and terminal-based Codex sessions."
   },
   {
     "id": "9PLM9XGG6VKS",
     "source": "msstore",
+    "display_name": "Codex Desktop",
     "install_by_default": true,
-    "notes": "Codex desktop app from Microsoft Store."
+    "notes": "Desktop Codex application from Microsoft Store.",
+    "project_hint": "Useful for restoring the same Codex workflow, chats, attachments, plugins, and local coding sessions."
   },
   {
     "id": "Python.Python.3.11",
     "source": "winget",
+    "display_name": "Python 3.11",
     "install_by_default": true,
-    "notes": "Python runtime."
+    "notes": "Python runtime and scripting toolchain.",
+    "project_hint": "Useful for automation scripts, data processing, AI tooling, backend utilities, and local test helpers."
   },
   {
     "id": "OpenJS.NodeJS.LTS",
     "source": "winget",
+    "display_name": "Node.js LTS",
     "install_by_default": true,
-    "notes": "Node.js for JS tooling and pnpm."
+    "notes": "JavaScript runtime for npm/pnpm tooling.",
+    "project_hint": "Useful for web apps, React/Next projects, frontend builds, bots, and JS automation."
   },
   {
     "id": "Microsoft.OpenJDK.17",
     "source": "winget",
+    "display_name": "OpenJDK 17",
     "install_by_default": false,
-    "notes": "Java toolchain for Android builds."
+    "notes": "Java runtime and compiler.",
+    "project_hint": "Useful for Android/Gradle projects and Java-based build tools."
   },
   {
     "id": "Google.AndroidStudio",
     "source": "winget",
+    "display_name": "Android Studio",
     "install_by_default": false,
-    "notes": "Android development IDE."
+    "notes": "Android IDE and SDK manager.",
+    "project_hint": "Useful for Android application development, emulator setup, signing, Gradle sync, and APK/AAB builds."
   },
   {
     "id": "Google.PlatformTools",
     "source": "winget",
+    "display_name": "Android Platform Tools",
     "install_by_default": false,
-    "notes": "adb and related Android tools."
+    "notes": "adb, fastboot, and related Android command-line tools.",
+    "project_hint": "Useful for device testing, installing APKs, logcat, screenshots, and VPN app diagnostics on Android."
   },
   {
     "id": "Docker.DockerDesktop",
     "source": "winget",
+    "display_name": "Docker Desktop",
     "install_by_default": false,
-    "notes": "Container workflows."
+    "notes": "Container runtime and desktop management app.",
+    "project_hint": "Useful for local services, databases, backend stacks, AI tools, and reproducible dev environments."
   },
   {
     "id": "Microsoft.WindowsTerminal",
     "source": "winget",
+    "display_name": "Windows Terminal",
     "install_by_default": true,
-    "notes": "Terminal environment."
+    "notes": "Modern terminal for PowerShell, cmd, and shells.",
+    "project_hint": "Useful for all command-line work, Git, Codex CLI, build scripts, and diagnostics."
   },
   {
     "id": "Google.Chrome.EXE",
     "source": "winget",
+    "display_name": "Google Chrome",
     "install_by_default": false,
-    "notes": "Default browser."
+    "notes": "Browser for web testing and everyday access.",
+    "project_hint": "Useful for frontend testing, site debugging, browser automation, and checking web projects."
   },
   {
     "id": "AmneziaVPN.AmneziaVPN",
     "source": "winget",
+    "display_name": "Amnezia VPN",
     "install_by_default": false,
-    "notes": "VPN desktop client."
+    "notes": "VPN desktop client.",
+    "project_hint": "Useful only if a project needs the same VPN access, private network, or tunnel diagnostics."
   },
   {
     "id": "Yandex.Disk",
     "source": "winget",
+    "display_name": "Yandex Disk",
     "install_by_default": false,
-    "notes": "Cloud sync client."
+    "notes": "Cloud file sync client.",
+    "project_hint": "Useful only if project files, documents, or shared assets live in Yandex Disk."
   },
   {
     "id": "Telegram.TelegramDesktop",
     "source": "winget",
+    "display_name": "Telegram Desktop",
     "install_by_default": false,
-    "notes": "Messenger used in the current setup."
+    "notes": "Messenger desktop client.",
+    "project_hint": "Useful for projects where communication, bot testing, channels, or saved files depend on Telegram."
   }
 ]

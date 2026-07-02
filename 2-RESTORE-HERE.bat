@@ -60,9 +60,10 @@ if not exist "%~dp0restore-codexkit.ps1" (
   exit /b 1
 )
 
-echo Vosstanovlyayu tolko rabochuyu sredu i osnovnye instrumenty.
-echo Polnyj spisok programm so starogo PK sohranitsya kak spravka,
-echo no igry, drajvery i sluchajnye prilozheniya ne stavyatsya avtomatom.
+echo Vosstanovlyayu rabochuyu sredu, proekty i nastroyki.
+echo Programmy budut predlozheny po odnoj: s korotkim opisaniem
+echo i podskazkoj, dlya kakih zadach oni mogut ponadobitsya.
+echo Polnyj spisok programm so starogo PK sohranitsya kak spravka.
 echo.
 set "DEFAULT_PRIVATE=%USERPROFILE%\Documents\TravelRestore"
 set "DEFAULT_PROGRAMS=%SystemDrive%\TravelApps"

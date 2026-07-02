@@ -598,7 +598,7 @@ function Install-WingetPackage {
         $args += @("--source", $Package.source)
     }
 
-    Write-Host "Installing $($Package.id)"
+    Write-Host "Installing $(Get-PackageDisplayName -Package $Package)"
     try {
         $installed = $false
 
@@ -627,6 +627,59 @@ function Install-WingetPackage {
         }
     } catch {
         Write-Warning "winget install failed for $($Package.id): $($_.Exception.Message)"
+    }
+}
+
+function Get-PackageInstallDefault {
+    param([pscustomobject]$Package)
+
+    if ($Package.PSObject.Properties.Name -contains "install_by_default") {
+        return [bool]$Package.install_by_default
+    }
+
+    return $false
+}
+
+function Get-PackageDisplayName {
+    param([pscustomobject]$Package)
+
+    if (($Package.PSObject.Properties.Name -contains "display_name") -and -not [string]::IsNullOrWhiteSpace([string]$Package.display_name)) {
+        return [string]$Package.display_name
+    }
+
+    return [string]$Package.id
+}
+
+function Confirm-PackageInstall {
+    param([pscustomobject]$Package)
+
+    $displayName = Get-PackageDisplayName -Package $Package
+    $recommended = Get-PackageInstallDefault -Package $Package
+    $defaultLabel = if ($recommended) { "Y/n" } else { "y/N" }
+
+    Write-Host ""
+    Write-Host $displayName -ForegroundColor Yellow
+    Write-Host "  Package: $($Package.id)"
+
+    if (($Package.PSObject.Properties.Name -contains "notes") -and -not [string]::IsNullOrWhiteSpace([string]$Package.notes)) {
+        Write-Host "  What it does: $($Package.notes)"
+    }
+
+    if (($Package.PSObject.Properties.Name -contains "project_hint") -and -not [string]::IsNullOrWhiteSpace([string]$Package.project_hint)) {
+        Write-Host "  Useful for: $($Package.project_hint)"
+    }
+
+    while ($true) {
+        $answer = Read-Host "  Install this app? [$defaultLabel]"
+        if ([string]::IsNullOrWhiteSpace($answer)) {
+            return $recommended
+        }
+
+        switch -Regex ($answer.Trim()) {
+            '^(y|yes|д|да)$' { return $true }
+            '^(n|no|н|нет)$' { return $false }
+            default { Write-Host "  Please answer Y or N." -ForegroundColor DarkYellow }
+        }
     }
 }
 
@@ -673,19 +726,23 @@ if (-not $SkipWinget) {
     if (-not $wingetPath) {
         Write-Warning "winget was not found. Program installation will be skipped, but data and project restore will continue."
     } elseif (Test-Path -LiteralPath $bootstrapPackagesPath) {
-        Write-Step "Installing critical packages"
+        Write-Step "Selecting workspace applications"
         $packages = Get-Content -LiteralPath $bootstrapPackagesPath -Raw | ConvertFrom-Json
-        $skippedOptionalPackages = 0
+        $selectedPackages = 0
+        $skippedPackages = 0
         foreach ($package in $packages) {
-            if (($package.PSObject.Properties.Name -contains "install_by_default") -and (-not [bool]$package.install_by_default)) {
-                $skippedOptionalPackages += 1
+            if (-not (Confirm-PackageInstall -Package $package)) {
+                $skippedPackages += 1
                 continue
             }
+
+            $selectedPackages += 1
             Install-WingetPackage -Package $package -ProgramsRoot $ProgramsRoot
         }
-        if ($skippedOptionalPackages -gt 0) {
-            Write-Host "Skipped $skippedOptionalPackages optional packages. Full old-PC app inventory is saved in winget-packages.json." -ForegroundColor DarkGray
-        }
+
+        Write-Host ""
+        Write-Host "Selected packages: $selectedPackages. Skipped packages: $skippedPackages." -ForegroundColor DarkGray
+        Write-Host "Full old-PC app inventory is saved in winget-packages.json for reference." -ForegroundColor DarkGray
     }
 }
 
