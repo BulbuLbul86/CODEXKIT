@@ -2,9 +2,13 @@
 repo-snapshots/
 docs/
 archive-hashes.txt
+environment-inventory.json
 machine-info.json
+repo-manifest.json
 state-manifest.json
 tool-versions.json
+vscode-extensions.txt
+winget-packages.json
 codexkit-state.zip
 codexkit-state.__new.zip
 codexkit-transfer.zip

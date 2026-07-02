@@ -685,6 +685,7 @@ $manifestPath = Join-Path $KitRoot "state-manifest.json"
 $hashesPath = Join-Path $KitRoot "archive-hashes.txt"
 $toolVersionsPath = Join-Path $KitRoot "tool-versions.json"
 $extensionsPath = Join-Path $KitRoot "vscode-extensions.txt"
+$wingetExportPath = Join-Path $KitRoot "winget-packages.json"
 $machineInfoPath = Join-Path $KitRoot "machine-info.json"
 $environmentInventoryPath = Join-Path $KitRoot "environment-inventory.json"
 $bootstrapPackagesPath = Join-Path $KitRoot "bootstrap-packages.json"
@@ -834,6 +835,20 @@ if ($codeCommand) {
     Set-Content -Path $extensionsPath -Value "# code command not found on source machine" -Encoding UTF8
 }
 
+Write-Step "Capturing winget package snapshot"
+$wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+if ($wingetCommand) {
+    & $wingetCommand.Source export --output $wingetExportPath --accept-source-agreements --disable-interactivity 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "winget export reported a non-zero exit code: $LASTEXITCODE"
+        if (-not (Test-Path -LiteralPath $wingetExportPath)) {
+            Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
+        }
+    }
+} else {
+    Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
+}
+
 Write-Step "Writing state manifest"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding UTF8
 
@@ -871,14 +886,14 @@ if (Test-Path -LiteralPath $transferZipBuildPath) {
 $transferItems = @(
     (Join-Path $KitRoot "1-BEFORE-MOVE.bat"),
     (Join-Path $KitRoot "2-RESTORE-HERE.bat"),
-    (Join-Path $KitRoot "README-RU.md"),
+    (Join-Path $KitRoot "README.md"),
     (Join-Path $KitRoot "refresh-codexkit.ps1"),
     (Join-Path $KitRoot "restore-codexkit.ps1"),
     (Join-Path $KitRoot "verify-codexkit.ps1"),
     $bootstrapPackagesPath,
     $customPathsConfigPath,
     $repoManifestPath,
-    (Join-Path $KitRoot "winget-packages.json"),
+    $wingetExportPath,
     $toolVersionsPath,
     $extensionsPath,
     $hashesPath,
