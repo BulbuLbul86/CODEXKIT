@@ -722,7 +722,7 @@ function Get-ConfiguredRepoRoots {
     )
 
     $candidates = New-Object System.Collections.Generic.List[string]
-    foreach ($candidate in @(
+    $defaultCandidates = @(
         (Join-Path $HomeDir "Documents\Codex"),
         (Join-Path $HomeDir "Documents"),
         (Join-Path $HomeDir "OneDrive\Documents"),
@@ -733,9 +733,14 @@ function Get-ConfiguredRepoRoots {
         (Join-Path $HomeDir "Projects"),
         (Join-Path $HomeDir "dev"),
         (Join-Path $HomeDir "repos"),
-        (Join-Path $HomeDir "GitHub"),
-        (Join-Path $WorkspaceRoot "work")
-    )) {
+        (Join-Path $HomeDir "GitHub")
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
+        $defaultCandidates += (Join-Path $WorkspaceRoot "work")
+    }
+
+    foreach ($candidate in $defaultCandidates) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
             $candidates.Add($candidate) | Out-Null
         }
