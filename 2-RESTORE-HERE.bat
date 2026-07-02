@@ -99,7 +99,7 @@ set "VERIFY_EXITCODE=%ERRORLEVEL%"
 
 echo.
 if "%VERIFY_EXITCODE%"=="0" (
-  echo GOTOBO. Osnovnye proverki proydeny.
+  echo GOTOVO. Osnovnye proverki proydeny.
 ) else (
   echo VOSSTANOVLENIE SDELANO, NO EShCHE EST CHTO PROVERIT. Kod: %VERIFY_EXITCODE%
 )

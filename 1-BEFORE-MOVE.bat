@@ -46,9 +46,9 @@ if "%ARCHIVE_PASSWORD%"=="" (
 set "EXITCODE=%ERRORLEVEL%"
 echo.
 if "%EXITCODE%"=="0" (
-  echo GOTOBO.
+  echo GOTOVO.
   echo.
-  echo Perenosi papku CODEXKIT celikom.
+  echo Perenosi vsyu fleshku ili vsyu papku s etimi failami.
   echo Na novom kompe zapusti tolko:
   echo   2-RESTORE-HERE.bat
   if exist "%~dp0codexkit-transfer.zip" (

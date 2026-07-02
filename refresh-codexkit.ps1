@@ -1482,6 +1482,7 @@ $hashesPath = Join-Path $KitRoot "archive-hashes.txt"
 $toolVersionsPath = Join-Path $KitRoot "tool-versions.json"
 $extensionsPath = Join-Path $KitRoot "vscode-extensions.txt"
 $wingetExportPath = Join-Path $KitRoot "winget-packages.json"
+$wingetExportLogPath = Join-Path $KitRoot "winget-export.log"
 $machineInfoPath = Join-Path $KitRoot "machine-info.json"
 $environmentInventoryPath = Join-Path $KitRoot "environment-inventory.json"
 $workIndexJsonPath = Join-Path $docsRoot "codex-work-index.json"
@@ -1707,15 +1708,18 @@ if ($codeCommand) {
 Write-Step "Capturing winget package snapshot"
 $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
 if ($wingetCommand) {
-    & $wingetCommand.Source export --output $wingetExportPath --accept-source-agreements --disable-interactivity 2>$null
+    & $wingetCommand.Source export --output $wingetExportPath --accept-source-agreements --disable-interactivity *> $wingetExportLogPath
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "winget export reported a non-zero exit code: $LASTEXITCODE"
+        Write-Warning "winget export reported a non-zero exit code: $LASTEXITCODE. Details: $wingetExportLogPath"
         if (-not (Test-Path -LiteralPath $wingetExportPath)) {
             Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
         }
+    } else {
+        Write-Host "winget snapshot saved. Full details: $wingetExportLogPath" -ForegroundColor DarkGray
     }
 } else {
     Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
+    Set-Content -Path $wingetExportLogPath -Value "winget command not found on source machine" -Encoding UTF8
 }
 
 Write-Step "Writing state manifest"
@@ -1777,6 +1781,7 @@ $transferItems = @(
     $customPathsConfigPath,
     $repoManifestPath,
     $wingetExportPath,
+    $wingetExportLogPath,
     $toolVersionsPath,
     $extensionsPath,
     $hashesPath,
