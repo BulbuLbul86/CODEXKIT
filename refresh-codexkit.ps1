@@ -988,6 +988,27 @@ function Discover-RepoManifestEntries {
     return $repos
 }
 
+function ConvertTo-FlatObjectArray {
+    param([object]$Value)
+
+    $items = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    if ($Value -is [System.Array]) {
+        foreach ($item in $Value) {
+            foreach ($flatItem in (ConvertTo-FlatObjectArray -Value $item)) {
+                $items.Add($flatItem) | Out-Null
+            }
+        }
+    } else {
+        $items.Add($Value) | Out-Null
+    }
+
+    return @($items.ToArray())
+}
+
 function Get-RepoSourceKey {
     param([object]$Repo)
 
@@ -1009,7 +1030,7 @@ function Merge-RepoManifestEntries {
     $seenSourcePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     $seenNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
-    foreach ($repo in @($ExistingRepos)) {
+    foreach ($repo in (ConvertTo-FlatObjectArray -Value $ExistingRepos)) {
         if ($null -eq $repo) {
             continue
         }
@@ -1027,7 +1048,7 @@ function Merge-RepoManifestEntries {
         $merged.Add($repo) | Out-Null
     }
 
-    foreach ($repo in @($DiscoveredRepos)) {
+    foreach ($repo in (ConvertTo-FlatObjectArray -Value $DiscoveredRepos)) {
         if ($null -eq $repo) {
             continue
         }
@@ -1061,14 +1082,14 @@ function Get-RepoManifestEntries {
     $existingRepos = @()
     if (Test-Path -LiteralPath $RepoManifestPath) {
         try {
-            $existingRepos = @(Get-Content -LiteralPath $RepoManifestPath -Raw | ConvertFrom-Json)
+            $existingRepos = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $RepoManifestPath -Raw | ConvertFrom-Json))
         } catch {
             Write-Warning "Could not read repo-manifest.json: $($_.Exception.Message)"
         }
     }
 
     Write-Step "Discovering work repository snapshots"
-    $discoveredRepos = @(Discover-RepoManifestEntries -Roots $Roots -ExcludedPathPrefixes $ExcludedPathPrefixes)
+    $discoveredRepos = @(ConvertTo-FlatObjectArray -Value (Discover-RepoManifestEntries -Roots $Roots -ExcludedPathPrefixes $ExcludedPathPrefixes))
     $mergedRepos = @(Merge-RepoManifestEntries -ExistingRepos $existingRepos -DiscoveredRepos $discoveredRepos)
     $mergedRepos | ConvertTo-Json -Depth 4 | Set-Content -Path $RepoManifestPath -Encoding UTF8
     return $mergedRepos
@@ -1615,8 +1636,14 @@ $repoExcludeFiles = @(
 )
 $repoManifestEntries = @(Get-RepoManifestEntries -RepoManifestPath $repoManifestPath -Roots $repoRoots -ExcludedPathPrefixes @($stateRoot, $repoSnapshotsRoot, $KitRoot))
 foreach ($repo in $repoManifestEntries) {
-    $sourcePath = $repo.source_path
-    $snapshotPath = Join-Path $repoSnapshotsRoot $repo.name
+    $sourcePath = [string]$repo.source_path
+    $repoName = [string]$repo.name
+    if ([string]::IsNullOrWhiteSpace($sourcePath) -or [string]::IsNullOrWhiteSpace($repoName)) {
+        Write-Warning "Skipping malformed repository manifest entry."
+        continue
+    }
+
+    $snapshotPath = Join-Path $repoSnapshotsRoot $repoName
     $status = if (Copy-DirWithExclusions -Source $sourcePath -Destination $snapshotPath -ExcludeDirs $repoExcludeDirs -ExcludeFiles $repoExcludeFiles) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "repo-snapshot" -Source $sourcePath -Destination $snapshotPath -Status $status
 }
