@@ -504,6 +504,122 @@ function Get-ConfiguredCopyEntries {
     }
 }
 
+function Test-SkippedDriveRepoFolderName {
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return $true
+    }
+
+    $excludedNames = @(
+        '$RECYCLE.BIN',
+        'System Volume Information',
+        'Recovery',
+        'Windows',
+        'Program Files',
+        'Program Files (x86)',
+        'ProgramData',
+        'Users',
+        'PerfLogs',
+        'Games',
+        'Steam',
+        'SteamLibrary',
+        'XboxGames',
+        'WindowsApps',
+        'WpSystem',
+        'MSOCache',
+        'OneDriveTemp',
+        'msdownld.tmp',
+        'Downloads',
+        'Foto',
+        'node_modules',
+        '.gradle',
+        '.venv',
+        'venv',
+        'dist',
+        'build',
+        '.next'
+    )
+
+    if ($excludedNames -contains $Name) {
+        return $true
+    }
+
+    return ($Name -match '^[0-9a-f]{12,}$')
+}
+
+function Find-GitRepoPathsBounded {
+    param(
+        [string]$Root,
+        [int]$MaxDepth = 3
+    )
+
+    $repos = New-Object System.Collections.Generic.List[string]
+    if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) {
+        return $repos
+    }
+
+    $queue = New-Object System.Collections.Generic.Queue[object]
+    $queue.Enqueue([pscustomobject]@{
+        Path  = $Root
+        Depth = 0
+    })
+
+    while ($queue.Count -gt 0) {
+        $current = $queue.Dequeue()
+        $currentPath = [string]$current.Path
+        $gitPath = Join-Path $currentPath ".git"
+        if (Test-Path -LiteralPath $gitPath) {
+            $repos.Add($currentPath) | Out-Null
+            continue
+        }
+
+        if ([int]$current.Depth -ge $MaxDepth) {
+            continue
+        }
+
+        try {
+            Get-ChildItem -LiteralPath $currentPath -Force -Directory -ErrorAction SilentlyContinue |
+                Where-Object { -not (Test-SkippedDriveRepoFolderName -Name $_.Name) } |
+                ForEach-Object {
+                    $queue.Enqueue([pscustomobject]@{
+                        Path  = $_.FullName
+                        Depth = ([int]$current.Depth + 1)
+                    })
+                }
+        } catch {
+            continue
+        }
+    }
+
+    return $repos
+}
+
+function Get-LooseDriveRepoRoots {
+    param([int]$MaxDepth = 3)
+
+    $repos = New-Object System.Collections.Generic.List[string]
+    foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace($drive.Root) -or -not (Test-Path -LiteralPath $drive.Root)) {
+            continue
+        }
+
+        try {
+            Get-ChildItem -LiteralPath $drive.Root -Force -Directory -ErrorAction SilentlyContinue |
+                Where-Object { -not (Test-SkippedDriveRepoFolderName -Name $_.Name) } |
+                ForEach-Object {
+                    foreach ($repoPath in (Find-GitRepoPathsBounded -Root $_.FullName -MaxDepth $MaxDepth)) {
+                        $repos.Add($repoPath) | Out-Null
+                    }
+                }
+        } catch {
+            continue
+        }
+    }
+
+    return $repos
+}
+
 function Get-ConfiguredRepoRoots {
     param(
         [object]$Config,
@@ -537,6 +653,12 @@ function Get-ConfiguredRepoRoots {
             if (-not [string]::IsNullOrWhiteSpace($candidate)) {
                 $candidates.Add($candidate) | Out-Null
             }
+        }
+    }
+
+    foreach ($candidate in (Get-LooseDriveRepoRoots -MaxDepth 3)) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $candidates.Add($candidate) | Out-Null
         }
     }
 
