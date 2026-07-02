@@ -127,10 +127,11 @@ function Add-ManifestEntry {
     )
 
     $Manifest.Add([pscustomobject]@{
-        category    = $Category
-        source      = $Source
-        destination = $Destination
-        status      = $Status
+        category            = $Category
+        source              = $Source
+        destination         = $Destination
+        restore_destination = Get-PortableRestorePath -Path $Source
+        status              = $Status
     }) | Out-Null
 }
 
@@ -341,14 +342,28 @@ function Get-ConfiguredRepoRoots {
     foreach ($candidate in @(
         (Join-Path $HomeDir "Documents\Codex"),
         (Join-Path $HomeDir "Documents"),
-        (Join-Path $HomeDir "source"),
-        (Join-Path $HomeDir "projects"),
-        (Join-Path $HomeDir "dev"),
+        (Join-Path $HomeDir "OneDrive\Documents"),
         (Join-Path $HomeDir "Desktop"),
+        (Join-Path $HomeDir "source"),
+        (Join-Path $HomeDir "src"),
+        (Join-Path $HomeDir "projects"),
+        (Join-Path $HomeDir "Projects"),
+        (Join-Path $HomeDir "dev"),
+        (Join-Path $HomeDir "repos"),
+        (Join-Path $HomeDir "GitHub"),
         (Join-Path $WorkspaceRoot "work")
     )) {
         if (-not [string]::IsNullOrWhiteSpace($candidate)) {
             $candidates.Add($candidate) | Out-Null
+        }
+    }
+
+    foreach ($drive in (Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue)) {
+        foreach ($folderName in @("Projects", "projects", "Code", "code", "dev", "source", "src", "repos", "GitHub")) {
+            $candidate = Join-Path $drive.Root $folderName
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $candidates.Add($candidate) | Out-Null
+            }
         }
     }
 
@@ -378,6 +393,149 @@ function Get-ConfiguredRepoRoots {
     }
 
     return $roots
+}
+
+function Convert-ToRelativePath {
+    param(
+        [string]$Root,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $normalizedRoot = $Root.TrimEnd('\')
+    if (-not $Path.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+
+    return $Path.Substring($normalizedRoot.Length).TrimStart('\')
+}
+
+function Get-PortableRestorePath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $portableRoots = @(
+        @{ Root = $homeDir; Token = "%USERPROFILE%" },
+        @{ Root = $appDataDir; Token = "%APPDATA%" },
+        @{ Root = $localAppDataDir; Token = "%LOCALAPPDATA%" }
+    )
+
+    foreach ($item in $portableRoots) {
+        $root = [string]$item.Root
+        if ([string]::IsNullOrWhiteSpace($root)) {
+            continue
+        }
+
+        $relative = Convert-ToRelativePath -Root $root -Path $Path
+        if ($null -ne $relative) {
+            if ([string]::IsNullOrWhiteSpace($relative)) {
+                return [string]$item.Token
+            }
+            return (Join-Path ([string]$item.Token) $relative)
+        }
+    }
+
+    return $Path
+}
+
+function Add-DetectedFileEntry {
+    param(
+        [System.Collections.Generic.List[hashtable]]$Files,
+        [string]$Category,
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Source) -or -not (Test-Path -LiteralPath $Source -PathType Leaf)) {
+        return
+    }
+
+    $Files.Add(@{
+        Category    = $Category
+        Source      = $Source
+        Destination = $Destination
+    }) | Out-Null
+}
+
+function Add-DetectedDirectoryEntry {
+    param(
+        [System.Collections.Generic.List[hashtable]]$Directories,
+        [string]$Category,
+        [string]$Source,
+        [string]$Destination
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Source) -or -not (Test-Path -LiteralPath $Source -PathType Container)) {
+        return
+    }
+
+    $Directories.Add(@{
+        Category    = $Category
+        Source      = $Source
+        Destination = $Destination
+    }) | Out-Null
+}
+
+function Get-DetectedEnvironmentEntries {
+    param(
+        [string]$HomeDir,
+        [string]$AppDataDir,
+        [string]$LocalAppDataDir,
+        [string]$StateRoot
+    )
+
+    $files = New-Object System.Collections.Generic.List[hashtable]
+    $directories = New-Object System.Collections.Generic.List[hashtable]
+
+    Add-DetectedFileEntry -Files $files -Category "auto-git" -Source (Join-Path $HomeDir ".gitconfig") -Destination (Join-Path $StateRoot "auto\home\.gitconfig")
+    Add-DetectedFileEntry -Files $files -Category "auto-git" -Source (Join-Path $HomeDir ".gitignore_global") -Destination (Join-Path $StateRoot "auto\home\.gitignore_global")
+    Add-DetectedFileEntry -Files $files -Category "auto-git" -Source (Join-Path $HomeDir ".git-credentials") -Destination (Join-Path $StateRoot "auto\home\.git-credentials")
+
+    Add-DetectedFileEntry -Files $files -Category "auto-node" -Source (Join-Path $HomeDir ".npmrc") -Destination (Join-Path $StateRoot "auto\home\.npmrc")
+    Add-DetectedFileEntry -Files $files -Category "auto-node" -Source (Join-Path $HomeDir ".yarnrc") -Destination (Join-Path $StateRoot "auto\home\.yarnrc")
+    Add-DetectedFileEntry -Files $files -Category "auto-node" -Source (Join-Path $HomeDir ".yarnrc.yml") -Destination (Join-Path $StateRoot "auto\home\.yarnrc.yml")
+    Add-DetectedFileEntry -Files $files -Category "auto-node" -Source (Join-Path $HomeDir ".pnpmrc") -Destination (Join-Path $StateRoot "auto\home\.pnpmrc")
+
+    Add-DetectedFileEntry -Files $files -Category "auto-python" -Source (Join-Path $HomeDir "pip\pip.ini") -Destination (Join-Path $StateRoot "auto\home\pip\pip.ini")
+    Add-DetectedFileEntry -Files $files -Category "auto-python" -Source (Join-Path $HomeDir ".pypirc") -Destination (Join-Path $StateRoot "auto\home\.pypirc")
+
+    Add-DetectedFileEntry -Files $files -Category "auto-java" -Source (Join-Path $HomeDir ".m2\settings.xml") -Destination (Join-Path $StateRoot "auto\home\.m2\settings.xml")
+    Add-DetectedFileEntry -Files $files -Category "auto-java" -Source (Join-Path $HomeDir ".gradle\gradle.properties") -Destination (Join-Path $StateRoot "auto\home\.gradle\gradle.properties")
+    Add-DetectedFileEntry -Files $files -Category "auto-java" -Source (Join-Path $HomeDir ".gradle\init.gradle") -Destination (Join-Path $StateRoot "auto\home\.gradle\init.gradle")
+
+    Add-DetectedFileEntry -Files $files -Category "auto-terminal" -Source (Join-Path $LocalAppDataDir "Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json") -Destination (Join-Path $StateRoot "auto\localappdata\WindowsTerminal\settings.json")
+    Add-DetectedFileEntry -Files $files -Category "auto-nuget" -Source (Join-Path $AppDataDir "NuGet\NuGet.Config") -Destination (Join-Path $StateRoot "auto\appdata\NuGet\NuGet.Config")
+
+    foreach ($editorName in @("Code", "Code - Insiders", "Cursor", "VSCodium")) {
+        $editorUserRoot = Join-Path $AppDataDir "$editorName\User"
+        $safeEditorName = $editorName -replace '[^A-Za-z0-9._-]', '-'
+        Add-DetectedFileEntry -Files $files -Category "auto-editor" -Source (Join-Path $editorUserRoot "settings.json") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\settings.json")
+        Add-DetectedFileEntry -Files $files -Category "auto-editor" -Source (Join-Path $editorUserRoot "keybindings.json") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\keybindings.json")
+        Add-DetectedDirectoryEntry -Directories $directories -Category "auto-editor" -Source (Join-Path $editorUserRoot "snippets") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\snippets")
+        Add-DetectedDirectoryEntry -Directories $directories -Category "auto-editor" -Source (Join-Path $editorUserRoot "profiles") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\profiles")
+        Add-DetectedDirectoryEntry -Directories $directories -Category "auto-editor" -Source (Join-Path $editorUserRoot "globalStorage") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\globalStorage")
+        Add-DetectedDirectoryEntry -Directories $directories -Category "auto-editor" -Source (Join-Path $editorUserRoot "workspaceStorage") -Destination (Join-Path $StateRoot "auto\appdata\editors\$safeEditorName\User\workspaceStorage")
+    }
+
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-shell" -Source (Join-Path $HomeDir "Documents\PowerShell") -Destination (Join-Path $StateRoot "auto\home\Documents\PowerShell")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-shell" -Source (Join-Path $HomeDir "Documents\WindowsPowerShell") -Destination (Join-Path $StateRoot "auto\home\Documents\WindowsPowerShell")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-github" -Source (Join-Path $AppDataDir "GitHub CLI") -Destination (Join-Path $StateRoot "auto\appdata\GitHub CLI")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-docker" -Source (Join-Path $HomeDir ".docker") -Destination (Join-Path $StateRoot "auto\home\.docker")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-kubernetes" -Source (Join-Path $HomeDir ".kube") -Destination (Join-Path $StateRoot "auto\home\.kube")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-cloud" -Source (Join-Path $HomeDir ".aws") -Destination (Join-Path $StateRoot "auto\home\.aws")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-cloud" -Source (Join-Path $HomeDir ".azure") -Destination (Join-Path $StateRoot "auto\home\.azure")
+    Add-DetectedDirectoryEntry -Directories $directories -Category "auto-cloud" -Source (Join-Path $HomeDir ".config\gcloud") -Destination (Join-Path $StateRoot "auto\home\.config\gcloud")
+
+    return [pscustomobject]@{
+        files       = $files
+        directories = $directories
+    }
 }
 
 function Get-GitRepoMetadata {
@@ -515,6 +673,7 @@ $codexPersistentDirs = @(
 
 $homeDir = [Environment]::GetFolderPath("UserProfile")
 $appDataDir = [Environment]::GetFolderPath("ApplicationData")
+$localAppDataDir = [Environment]::GetFolderPath("LocalApplicationData")
 $workspaceRoot = Split-Path -Parent $KitRoot
 $stateRoot = Join-Path $KitRoot "state"
 $repoSnapshotsRoot = Join-Path $KitRoot "repo-snapshots"
@@ -527,6 +686,7 @@ $hashesPath = Join-Path $KitRoot "archive-hashes.txt"
 $toolVersionsPath = Join-Path $KitRoot "tool-versions.json"
 $extensionsPath = Join-Path $KitRoot "vscode-extensions.txt"
 $machineInfoPath = Join-Path $KitRoot "machine-info.json"
+$environmentInventoryPath = Join-Path $KitRoot "environment-inventory.json"
 $bootstrapPackagesPath = Join-Path $KitRoot "bootstrap-packages.json"
 $repoManifestPath = Join-Path $KitRoot "repo-manifest.json"
 $customPathsConfigPath = Join-Path $KitRoot "custom-paths.json"
@@ -534,6 +694,7 @@ $customPathsConfigPath = Join-Path $KitRoot "custom-paths.json"
 $manifest = [System.Collections.Generic.List[object]]::new()
 $customPathsConfig = Get-OptionalJsonConfig -Path $customPathsConfigPath
 $configuredCopyEntries = Get-ConfiguredCopyEntries -Config $customPathsConfig -StateRoot $stateRoot -DocsRoot $docsRoot
+$detectedEnvironmentEntries = Get-DetectedEnvironmentEntries -HomeDir $homeDir -AppDataDir $appDataDir -LocalAppDataDir $localAppDataDir -StateRoot $stateRoot
 $repoRoots = Get-ConfiguredRepoRoots -Config $customPathsConfig -HomeDir $homeDir -WorkspaceRoot $workspaceRoot
 
 Write-Step "Refreshing state folder"
@@ -560,6 +721,10 @@ $copyFiles = @(
     @{ Category = "android"; Source = (Join-Path $homeDir ".android\debug.keystore"); Destination = (Join-Path $stateRoot "android\debug.keystore") }
 )
 
+foreach ($entry in $detectedEnvironmentEntries.files) {
+    $copyFiles += $entry
+}
+
 foreach ($entry in $configuredCopyEntries.files) {
     $copyFiles += $entry
 }
@@ -583,6 +748,10 @@ $copyDirs = @(
     @{ Category = "vscode"; Source = (Join-Path $appDataDir "Code\User\globalStorage"); Destination = (Join-Path $stateRoot "vscode\User\globalStorage") },
     @{ Category = "vscode"; Source = (Join-Path $appDataDir "Code\User\workspaceStorage"); Destination = (Join-Path $stateRoot "vscode\User\workspaceStorage") }
 )
+
+foreach ($entry in $detectedEnvironmentEntries.directories) {
+    $copyDirs += $entry
+}
 
 foreach ($entry in $configuredCopyEntries.directories) {
     $copyDirs += $entry
@@ -625,6 +794,20 @@ foreach ($repo in $repoManifestEntries) {
     $status = if (Copy-DirWithExclusions -Source $sourcePath -Destination $snapshotPath -ExcludeDirs $repoExcludeDirs -ExcludeFiles $repoExcludeFiles) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "repo-snapshot" -Source $sourcePath -Destination $snapshotPath -Status $status
 }
+
+Write-Step "Writing environment inventory"
+$environmentInventory = [pscustomobject]@{
+    generated_at          = (Get-Date).ToString("o")
+    source_machine        = $env:COMPUTERNAME
+    source_user           = $env:USERNAME
+    repo_search_roots     = @($repoRoots)
+    repos_detected        = @($repoManifestEntries).Count
+    auto_files_detected   = @($detectedEnvironmentEntries.files).Count
+    auto_dirs_detected    = @($detectedEnvironmentEntries.directories).Count
+    copied_items          = @($manifest | Where-Object { $_.status -eq "copied" } | Select-Object category, source, destination, restore_destination)
+    missing_items         = @($manifest | Where-Object { $_.status -eq "missing" } | Select-Object category, source, destination, restore_destination)
+}
+$environmentInventory | ConvertTo-Json -Depth 6 | Set-Content -Path $environmentInventoryPath -Encoding UTF8
 
 Write-Step "Capturing tool versions"
 $toolVersions = @(
@@ -701,6 +884,7 @@ $transferItems = @(
     $hashesPath,
     $manifestPath,
     $machineInfoPath,
+    $environmentInventoryPath,
     $docsRoot,
     $repoSnapshotsRoot,
     $effectiveStateZipPath

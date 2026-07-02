@@ -97,6 +97,172 @@ function Backup-DirIfExists {
     return $backupPath
 }
 
+function Resolve-PortableRestorePath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    return [Environment]::ExpandEnvironmentVariables($Path)
+}
+
+function Get-SafeBackupName {
+    param([string]$Path)
+
+    $name = $Path -replace '[:\\/]+', '_'
+    $name = $name -replace '[^A-Za-z0-9._-]', '_'
+    return $name.Trim('_')
+}
+
+function Backup-StateItemIfExists {
+    param(
+        [string]$Path,
+        [string]$BackupRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+
+    Ensure-Dir -Path $BackupRoot
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $backupName = "{0}-{1}" -f (Get-SafeBackupName -Path $Path), $timestamp
+    $backupPath = Join-Path $BackupRoot $backupName
+    $item = Get-Item -LiteralPath $Path -Force
+
+    if ($item.PSIsContainer) {
+        robocopy $Path $backupPath /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+        if ($LASTEXITCODE -ge 8) {
+            throw "robocopy backup failed for $Path -> $backupPath with exit code $LASTEXITCODE"
+        }
+        return $backupPath
+    }
+
+    Ensure-Dir -Path (Split-Path -Parent $backupPath)
+    Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+    return $backupPath
+}
+
+function Restore-AutoManifestEntries {
+    param(
+        [string]$ManifestPath,
+        [string]$BackupRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        return
+    }
+
+    try {
+        $entries = @(Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
+    } catch {
+        Write-Warning "Could not read state manifest for auto restore: $($_.Exception.Message)"
+        return
+    }
+
+    $autoEntries = @($entries | Where-Object { $_.status -eq "copied" -and ([string]$_.category).StartsWith("auto-") })
+    if ($autoEntries.Count -eq 0) {
+        return
+    }
+
+    Write-Step "Restoring auto-detected environment settings"
+    foreach ($entry in $autoEntries) {
+        $source = [string]$entry.destination
+        $destinationTemplate = [string]$entry.restore_destination
+        $destination = Resolve-PortableRestorePath -Path $destinationTemplate
+
+        if ([string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($destination)) {
+            continue
+        }
+
+        if (-not (Test-Path -LiteralPath $source)) {
+            Write-Warning "Auto item is missing in package: $source"
+            continue
+        }
+
+        $sourceItem = Get-Item -LiteralPath $source -Force
+        if (Test-Path -LiteralPath $destination) {
+            $backupPath = Backup-StateItemIfExists -Path $destination -BackupRoot $BackupRoot
+            if ($backupPath) {
+                Write-Host "Backed up existing auto setting to $backupPath"
+            }
+        }
+
+        Write-Host "Restoring $($entry.category): $destination"
+        if ($sourceItem.PSIsContainer) {
+            Mirror-Dir -Source $source -Destination $destination | Out-Null
+        } else {
+            Copy-FileIfExists -Source $source -Destination $destination | Out-Null
+        }
+    }
+}
+
+function Get-RelativePathIfUnder {
+    param(
+        [string]$Root,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Root) -or [string]::IsNullOrWhiteSpace($Path)) {
+        return $null
+    }
+
+    $normalizedRoot = $Root.TrimEnd('\')
+    if (-not $Path.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $null
+    }
+
+    return $Path.Substring($normalizedRoot.Length).TrimStart('\')
+}
+
+function Restore-CustomManifestEntries {
+    param(
+        [string]$ManifestPath,
+        [string]$StateRoot,
+        [string]$PrivateRestoreRoot
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        return
+    }
+
+    try {
+        $entries = @(Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json)
+    } catch {
+        Write-Warning "Could not read state manifest for custom restore: $($_.Exception.Message)"
+        return
+    }
+
+    $customEntries = @($entries | Where-Object { $_.status -eq "copied" -and ([string]$_.category).StartsWith("custom-") })
+    if ($customEntries.Count -eq 0) {
+        return
+    }
+
+    Write-Step "Restoring custom private files"
+    Ensure-Dir -Path $PrivateRestoreRoot
+    foreach ($entry in $customEntries) {
+        $source = [string]$entry.destination
+        if ([string]::IsNullOrWhiteSpace($source) -or -not (Test-Path -LiteralPath $source)) {
+            continue
+        }
+
+        $relative = Get-RelativePathIfUnder -Root $StateRoot -Path $source
+        if ([string]::IsNullOrWhiteSpace($relative)) {
+            $relative = Split-Path -Leaf $source
+        }
+
+        $destination = Join-Path $PrivateRestoreRoot $relative
+        $sourceItem = Get-Item -LiteralPath $source -Force
+        Write-Host "Restoring $($entry.category): $destination"
+        if ($sourceItem.PSIsContainer) {
+            Copy-DirIfExists -Source $source -Destination $destination | Out-Null
+        } else {
+            Copy-FileIfExists -Source $source -Destination $destination | Out-Null
+        }
+    }
+}
+
 function Get-DefaultWorkspaceRoot {
     return (Join-Path $HOME "Documents\Codex\restored-workspace")
 }
@@ -395,6 +561,7 @@ function Install-WingetPackage {
 $kitRoot = Split-Path -Parent $PSCommandPath
 $stateRoot = Join-Path $kitRoot "state"
 $zipPath = Join-Path $kitRoot "codexkit-state.zip"
+$stateManifestPath = Join-Path $kitRoot "state-manifest.json"
 $bootstrapPackagesPath = Join-Path $kitRoot "bootstrap-packages.json"
 $repoManifestPath = Join-Path $kitRoot "repo-manifest.json"
 $repoSnapshotsRoot = Join-Path $kitRoot "repo-snapshots"
@@ -507,6 +674,9 @@ if (-not $SkipState) {
     Copy-DirIfExists -Source (Join-Path $stateRoot "android-signing") -Destination (Join-Path $PrivateRestoreRoot "android-signing") | Out-Null
     Copy-DirIfExists -Source (Join-Path $stateRoot "artifacts") -Destination (Join-Path $PrivateRestoreRoot "artifacts") | Out-Null
     Copy-DirIfExists -Source $docsRoot -Destination (Join-Path $PrivateRestoreRoot "docs") | Out-Null
+
+    Restore-AutoManifestEntries -ManifestPath $stateManifestPath -BackupRoot (Join-Path $travelKitStateDir "backups\auto-state")
+    Restore-CustomManifestEntries -ManifestPath $stateManifestPath -StateRoot $stateRoot -PrivateRestoreRoot $PrivateRestoreRoot
 }
 
 $gitPath = Find-CommandPath -Name "git" -Fallback (Join-Path ${env:ProgramFiles} "Git\cmd\git.exe")
