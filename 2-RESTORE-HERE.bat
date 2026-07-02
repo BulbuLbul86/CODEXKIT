@@ -34,6 +34,32 @@ if errorlevel 1 (
 
 echo Codex i VS Code zakryty. Mozhno prodolzhat.
 echo.
+
+call :ENSURE_CODEXKIT_PAYLOAD
+set "BOOTSTRAP_EXITCODE=%ERRORLEVEL%"
+if not "%BOOTSTRAP_EXITCODE%"=="0" (
+  echo.
+  echo OShIBKA RASPAKOVKI KOMPLEKTA. Kod: %BOOTSTRAP_EXITCODE%
+  echo.
+  pause
+  exit /b %BOOTSTRAP_EXITCODE%
+)
+
+if not exist "%~dp0restore-codexkit.ps1" (
+  if exist "%~dp0CODEXKIT\2-RESTORE-HERE.bat" (
+    echo Komplekt raspakovan. Zapuskayu vosstanovlenie iz nego...
+    echo.
+    call "%~dp0CODEXKIT\2-RESTORE-HERE.bat"
+    exit /b %ERRORLEVEL%
+  )
+
+  echo Ne nayden restore-codexkit.ps1 i ne poluchilos raspakovat komplekt.
+  echo Prover, chto ryadom est codexkit-transfer.zip ili papka codexkit-transfer-parts.
+  echo.
+  pause
+  exit /b 1
+)
+
 echo 1 - tolko rabochaya sreda i glavnye programmy
 echo 2 - plus pochti ves nabor programm cherez winget
 echo.
@@ -80,3 +106,95 @@ if "%VERIFY_EXITCODE%"=="0" (
 echo.
 pause
 exit /b %VERIFY_EXITCODE%
+
+:ENSURE_CODEXKIT_PAYLOAD
+if exist "%~dp0restore-codexkit.ps1" (
+  if exist "%~dp0state" exit /b 0
+  if exist "%~dp0codexkit-state.zip" exit /b 0
+)
+
+if exist "%~dp0codexkit-transfer.zip" goto UNPACK_CODEXKIT_PAYLOAD
+if exist "%~dp0codexkit-transfer-parts" goto UNPACK_CODEXKIT_PAYLOAD
+dir /b "%~dp0codexkit-transfer-part-*.zip" >nul 2>nul
+if not errorlevel 1 goto UNPACK_CODEXKIT_PAYLOAD
+exit /b 0
+
+:UNPACK_CODEXKIT_PAYLOAD
+echo Nayden perenosimyj arhiv. Raspakovyvayu shtatnymi sredstvami Windows...
+set "CODEXKIT_BOOTSTRAP_BAT=%~f0"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $bat=$env:CODEXKIT_BOOTSTRAP_BAT; $marker=':CODEXKIT_BOOTSTRAP_PS'; $text=[System.IO.File]::ReadAllText($bat); $idx=$text.LastIndexOf($marker); if ($idx -lt 0) { throw 'CODEXKIT bootstrap marker is missing.' }; $script=$text.Substring($idx + $marker.Length); Invoke-Expression $script"
+exit /b %ERRORLEVEL%
+
+:CODEXKIT_BOOTSTRAP_PS
+$ErrorActionPreference = "Stop"
+
+function Ensure-Dir {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+    }
+}
+
+function Restore-LargeFilesIfNeeded {
+    param([string]$Root)
+
+    $largeFilesManifestPath = Join-Path $Root "codexkit-large-files\manifest.json"
+    if (-not (Test-Path -LiteralPath $largeFilesManifestPath)) {
+        return
+    }
+
+    $manifest = Get-Content -LiteralPath $largeFilesManifestPath -Raw | ConvertFrom-Json
+    foreach ($file in @($manifest.files)) {
+        $destination = Join-Path $Root (([string]$file.path) -replace '/', '\')
+        Ensure-Dir -Path (Split-Path -Parent $destination)
+
+        $outputStream = [System.IO.File]::Open($destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+        try {
+            foreach ($chunk in @($file.chunks)) {
+                $chunkPath = Join-Path $Root (([string]$chunk) -replace '/', '\')
+                $inputStream = [System.IO.File]::OpenRead($chunkPath)
+                try {
+                    $inputStream.CopyTo($outputStream)
+                } finally {
+                    $inputStream.Dispose()
+                }
+            }
+        } finally {
+            $outputStream.Dispose()
+        }
+    }
+
+    Remove-Item -LiteralPath (Join-Path $Root "codexkit-large-files") -Recurse -Force
+}
+
+$root = Split-Path -Parent $env:CODEXKIT_BOOTSTRAP_BAT
+$hasRestoreScript = Test-Path -LiteralPath (Join-Path $root "restore-codexkit.ps1")
+$outputRoot = if ($hasRestoreScript) { $root } else { Join-Path $root "CODEXKIT" }
+Ensure-Dir -Path $outputRoot
+
+$singleArchive = Join-Path $root "codexkit-transfer.zip"
+$partsRoot = Join-Path $root "codexkit-transfer-parts"
+
+if (Test-Path -LiteralPath $singleArchive) {
+    Write-Host "Extracting codexkit-transfer.zip"
+    Expand-Archive -LiteralPath $singleArchive -DestinationPath $outputRoot -Force
+    Restore-LargeFilesIfNeeded -Root $outputRoot
+    return
+}
+
+$parts = @()
+if (Test-Path -LiteralPath $partsRoot) {
+    $parts = @(Get-ChildItem -LiteralPath $partsRoot -Filter "codexkit-transfer-part-*.zip" -File -ErrorAction SilentlyContinue | Sort-Object Name)
+} else {
+    $parts = @(Get-ChildItem -LiteralPath $root -Filter "codexkit-transfer-part-*.zip" -File -ErrorAction SilentlyContinue | Sort-Object Name)
+}
+
+if ($parts.Count -eq 0) {
+    throw "No codexkit-transfer.zip or codexkit-transfer-part-*.zip files found."
+}
+
+foreach ($part in $parts) {
+    Write-Host "Extracting $($part.Name)"
+    Expand-Archive -LiteralPath $part.FullName -DestinationPath $outputRoot -Force
+}
+Restore-LargeFilesIfNeeded -Root $outputRoot

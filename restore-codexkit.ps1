@@ -23,6 +23,78 @@ function Ensure-Dir {
     }
 }
 
+function Restore-LargeTransferFilesIfNeeded {
+    param([string]$Root)
+
+    $largeFilesManifestPath = Join-Path $Root "codexkit-large-files\manifest.json"
+    if (-not (Test-Path -LiteralPath $largeFilesManifestPath)) {
+        return
+    }
+
+    Write-Step "Restoring large transfer files"
+    $manifest = Get-Content -LiteralPath $largeFilesManifestPath -Raw | ConvertFrom-Json
+    foreach ($file in @($manifest.files)) {
+        $destination = Join-Path $Root (([string]$file.path) -replace '/', '\')
+        Ensure-Dir -Path (Split-Path -Parent $destination)
+
+        $outputStream = [System.IO.File]::Open($destination, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write)
+        try {
+            foreach ($chunk in @($file.chunks)) {
+                $chunkPath = Join-Path $Root (([string]$chunk) -replace '/', '\')
+                $inputStream = [System.IO.File]::OpenRead($chunkPath)
+                try {
+                    $inputStream.CopyTo($outputStream)
+                } finally {
+                    $inputStream.Dispose()
+                }
+            }
+        } finally {
+            $outputStream.Dispose()
+        }
+    }
+
+    Remove-Item -LiteralPath (Join-Path $Root "codexkit-large-files") -Recurse -Force
+}
+
+function Expand-TransferPayloadIfNeeded {
+    param(
+        [string]$KitRoot,
+        [string]$StateRoot,
+        [string]$StateZipPath
+    )
+
+    if ((Test-Path -LiteralPath $StateRoot) -or (Test-Path -LiteralPath $StateZipPath)) {
+        return
+    }
+
+    $singleArchive = Join-Path $KitRoot "codexkit-transfer.zip"
+    if (Test-Path -LiteralPath $singleArchive) {
+        Write-Step "Expanding transfer archive"
+        Expand-Archive -LiteralPath $singleArchive -DestinationPath $KitRoot -Force
+        Restore-LargeTransferFilesIfNeeded -Root $KitRoot
+        return
+    }
+
+    $partsRoot = Join-Path $KitRoot "codexkit-transfer-parts"
+    $parts = @()
+    if (Test-Path -LiteralPath $partsRoot) {
+        $parts = @(Get-ChildItem -LiteralPath $partsRoot -Filter "codexkit-transfer-part-*.zip" -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    } else {
+        $parts = @(Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-part-*.zip" -File -ErrorAction SilentlyContinue | Sort-Object Name)
+    }
+
+    if ($parts.Count -eq 0) {
+        return
+    }
+
+    Write-Step "Expanding split transfer archives"
+    foreach ($part in $parts) {
+        Write-Host "Extracting $($part.Name)"
+        Expand-Archive -LiteralPath $part.FullName -DestinationPath $KitRoot -Force
+    }
+    Restore-LargeTransferFilesIfNeeded -Root $KitRoot
+}
+
 function Copy-FileIfExists {
     param(
         [string]$Source,
@@ -575,6 +647,8 @@ $repoLocationStatePath = Join-Path $travelKitStateDir "repo-locations.json"
 $repoLocationState = Get-RepoLocationState -Path $repoLocationStatePath
 $resolvedRepoPaths = @{}
 $codexBackupRoot = Join-Path $travelKitStateDir "backups\codex-home"
+
+Expand-TransferPayloadIfNeeded -KitRoot $kitRoot -StateRoot $stateRoot -StateZipPath $zipPath
 
 if (Test-Path -LiteralPath $machineInfoPath) {
     try {

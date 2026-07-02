@@ -13,9 +13,9 @@ echo ty seychas uezzhaesh.
 echo.
 echo On:
 echo - obnovit nastroyki i lokalnye dannye
-echo - sohranit adb, ssh, vscode, codex i privatnye faily
+echo - sohranit naydennye nastroyki, dostupy, instrumenty i privatnye faily
 echo - sdelayet snimki rabochih repo dlya tochnogo pereezda
-echo - po vozmozhnosti soberet codexkit-transfer.zip dlya fleshki ili pochty
+echo - soberet perenosimyj komplekt dlya fleshki ili pochty
 echo.
 
 :WAIT_FOR_APPS_CLOSED
@@ -45,20 +45,30 @@ echo.
 if "%EXITCODE%"=="0" (
   echo GOTOBO.
   echo.
-  echo Perenosi v celom vide papku CODEXKIT
+  echo Perenosi papku CODEXKIT celikom.
+  echo Na novom kompe zapusti tolko:
+  echo   2-RESTORE-HERE.bat
   if exist "%~dp0codexkit-transfer.zip" (
-    echo ILI fayl:
+    echo.
+    echo Sozdan odin arhiv:
     echo   %~dp0codexkit-transfer.zip
+    echo Ego ne nado otkryvat rukami: vtoroj batnik sam ego raspakuet.
   ) else (
-    echo Otdelnyj codexkit-transfer.zip ne sozdan.
-    echo Eto normalno, esli nositel FAT32 i arhiv slishkom bolshoy.
-    echo V etom sluchae perenosi vsyu papku CODEXKIT.
+    if exist "%~dp0codexkit-transfer-parts" (
+      echo.
+      echo Odin arhiv byl by slishkom bolshoy, poetomu sozdana papka chastej:
+      echo   %~dp0codexkit-transfer-parts
+      echo Vtoroj batnik sam soberyot ih obratno.
+    )
   )
   if not "%ARCHIVE_PASSWORD%"=="" (
-    if exist "%~dp0codexkit-transfer-secure.rar" (
-      echo   %~dp0codexkit-transfer-secure.rar
+    if exist "%~dp0codexkit-transfer-secure*.rar" (
+      echo.
+      echo Sozdan zashchishchennyj arhiv ili ego chasti:
+      echo   %~dp0codexkit-transfer-secure*.rar
     ) else (
-      echo Zashchishchennyj arhiv tozhe ne sozdan. Ispolzuy vsyu papku CODEXKIT.
+      echo.
+      echo Zashchishchennyj arhiv ne sozdan. Ispolzuy obychnyj komplekt CODEXKIT.
     )
   )
 ) else (

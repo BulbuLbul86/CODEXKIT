@@ -153,33 +153,6 @@ function Normalize-ZipTimestamps {
     }
 }
 
-function Get-DriveFileSystem {
-    param([string]$Path)
-
-    try {
-        $resolved = Resolve-Path -LiteralPath $Path -ErrorAction SilentlyContinue
-        $targetPath = if ($resolved) { $resolved.Path } else { $Path }
-        $root = [System.IO.Path]::GetPathRoot($targetPath)
-        if ([string]::IsNullOrWhiteSpace($root)) {
-            return $null
-        }
-
-        $driveLetter = $root.TrimEnd('\').TrimEnd(':')
-        if ([string]::IsNullOrWhiteSpace($driveLetter)) {
-            return $null
-        }
-
-        $volume = Get-Volume -DriveLetter $driveLetter -ErrorAction SilentlyContinue
-        if ($volume) {
-            return $volume.FileSystem
-        }
-    } catch {
-        return $null
-    }
-
-    return $null
-}
-
 function Get-PathTotalBytes {
     param([string]$Path)
 
@@ -198,6 +171,206 @@ function Get-PathTotalBytes {
     }
 
     return [int64]$sum
+}
+
+function Get-ArchiveRelativePath {
+    param(
+        [string]$BaseRoot,
+        [string]$Path
+    )
+
+    $relative = Convert-ToRelativePath -Root $BaseRoot -Path $Path
+    if ($null -eq $relative) {
+        $relative = Split-Path -Leaf $Path
+    }
+
+    return ($relative -replace '\\', '/')
+}
+
+function Get-TransferFileEntries {
+    param(
+        [string[]]$Items,
+        [string]$BaseRoot
+    )
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    foreach ($item in $Items) {
+        if (-not (Test-Path -LiteralPath $item)) {
+            continue
+        }
+
+        $resolvedItem = (Resolve-Path -LiteralPath $item).Path
+        $fileItem = Get-Item -LiteralPath $resolvedItem -Force
+        if (-not $fileItem.PSIsContainer) {
+            $entries.Add([pscustomobject]@{
+                file_path    = $fileItem.FullName
+                archive_path = Get-ArchiveRelativePath -BaseRoot $BaseRoot -Path $fileItem.FullName
+                length       = [int64]$fileItem.Length
+            }) | Out-Null
+            continue
+        }
+
+        Get-ChildItem -LiteralPath $fileItem.FullName -Recurse -Force -File -ErrorAction SilentlyContinue | ForEach-Object {
+            $entries.Add([pscustomobject]@{
+                file_path    = $_.FullName
+                archive_path = Get-ArchiveRelativePath -BaseRoot $BaseRoot -Path $_.FullName
+                length       = [int64]$_.Length
+            }) | Out-Null
+        }
+    }
+
+    return @($entries | Sort-Object archive_path)
+}
+
+function Add-FileChunkToZip {
+    param(
+        [System.IO.Compression.ZipArchive]$Zip,
+        [System.IO.Stream]$SourceStream,
+        [string]$EntryName,
+        [int64]$BytesToCopy
+    )
+
+    $entry = $Zip.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::NoCompression)
+    $targetStream = $entry.Open()
+    try {
+        $buffer = New-Object byte[] (1024 * 1024)
+        $remaining = [int64]$BytesToCopy
+        while ($remaining -gt 0) {
+            $readSize = [int][Math]::Min([int64]$buffer.Length, $remaining)
+            $read = $SourceStream.Read($buffer, 0, $readSize)
+            if ($read -le 0) {
+                break
+            }
+            $targetStream.Write($buffer, 0, $read)
+            $remaining -= $read
+        }
+    } finally {
+        $targetStream.Dispose()
+    }
+}
+
+function New-SplitTransferArchives {
+    param(
+        [string[]]$Items,
+        [string]$BaseRoot,
+        [string]$PartsRoot,
+        [int64]$PartTargetBytes
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Clear-Dir -Path $PartsRoot
+
+    $partPaths = New-Object System.Collections.Generic.List[string]
+    $largeFileRecords = New-Object System.Collections.Generic.List[object]
+    $entries = @(Get-TransferFileEntries -Items $Items -BaseRoot $BaseRoot)
+
+    $currentPart = $null
+    $currentBytes = [int64]0
+    $partIndex = 0
+
+    foreach ($entry in $entries) {
+        if ($entry.length -gt $PartTargetBytes) {
+            $sourceStream = [System.IO.File]::OpenRead([string]$entry.file_path)
+            try {
+                $remaining = [int64]$entry.length
+                $chunkIndex = 0
+                $chunkId = [guid]::NewGuid().ToString("N")
+                $chunks = New-Object System.Collections.Generic.List[string]
+
+                while ($remaining -gt 0) {
+                    if ($null -eq $currentPart -or $currentBytes -gt 0) {
+                        if ($currentPart) {
+                            $currentPart.Zip.Dispose()
+                        }
+                        $partIndex++
+                        $partPath = Join-Path $PartsRoot ("codexkit-transfer-part-{0:D3}.zip" -f $partIndex)
+                        $currentPart = [pscustomobject]@{
+                            Path = $partPath
+                            Zip  = [System.IO.Compression.ZipFile]::Open($partPath, [System.IO.Compression.ZipArchiveMode]::Create)
+                        }
+                        $partPaths.Add($partPath) | Out-Null
+                        $currentBytes = [int64]0
+                    }
+
+                    $chunkIndex++
+                    $chunkBytes = [Math]::Min($PartTargetBytes, $remaining)
+                    $chunkName = "{0:D5}" -f $chunkIndex
+                    $chunkEntryName = "codexkit-large-files/$chunkId/chunk-$chunkName.bin"
+                    Add-FileChunkToZip -Zip $currentPart.Zip -SourceStream $sourceStream -EntryName $chunkEntryName -BytesToCopy $chunkBytes
+                    $chunks.Add($chunkEntryName) | Out-Null
+                    $currentBytes += [int64]$chunkBytes
+                    $remaining -= [int64]$chunkBytes
+                }
+
+                $largeFileRecords.Add([pscustomobject]@{
+                    path   = [string]$entry.archive_path
+                    length = [int64]$entry.length
+                    chunks = @($chunks.ToArray())
+                }) | Out-Null
+            } finally {
+                $sourceStream.Dispose()
+            }
+            continue
+        }
+
+        if ($null -eq $currentPart -or ($currentBytes -gt 0 -and ($currentBytes + [int64]$entry.length) -gt $PartTargetBytes)) {
+            if ($currentPart) {
+                $currentPart.Zip.Dispose()
+            }
+            $partIndex++
+            $partPath = Join-Path $PartsRoot ("codexkit-transfer-part-{0:D3}.zip" -f $partIndex)
+            $currentPart = [pscustomobject]@{
+                Path = $partPath
+                Zip  = [System.IO.Compression.ZipFile]::Open($partPath, [System.IO.Compression.ZipArchiveMode]::Create)
+            }
+            $partPaths.Add($partPath) | Out-Null
+            $currentBytes = [int64]0
+        }
+
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $currentPart.Zip,
+            [string]$entry.file_path,
+            [string]$entry.archive_path,
+            [System.IO.Compression.CompressionLevel]::Optimal
+        ) | Out-Null
+        $currentBytes += [Math]::Max([int64]$entry.length, [int64]1)
+    }
+
+    if ($largeFileRecords.Count -gt 0) {
+        $manifestJson = ([pscustomobject]@{
+            version = 1
+            files   = @($largeFileRecords.ToArray())
+        } | ConvertTo-Json -Depth 8)
+        $manifestBytes = [System.Text.Encoding]::UTF8.GetBytes($manifestJson)
+
+        if ($null -eq $currentPart -or ($currentBytes + $manifestBytes.Length) -gt $PartTargetBytes) {
+            if ($currentPart) {
+                $currentPart.Zip.Dispose()
+            }
+            $partIndex++
+            $partPath = Join-Path $PartsRoot ("codexkit-transfer-part-{0:D3}.zip" -f $partIndex)
+            $currentPart = [pscustomobject]@{
+                Path = $partPath
+                Zip  = [System.IO.Compression.ZipFile]::Open($partPath, [System.IO.Compression.ZipArchiveMode]::Create)
+            }
+            $partPaths.Add($partPath) | Out-Null
+            $currentBytes = [int64]0
+        }
+
+        $manifestEntry = $currentPart.Zip.CreateEntry("codexkit-large-files/manifest.json", [System.IO.Compression.CompressionLevel]::Optimal)
+        $manifestStream = $manifestEntry.Open()
+        try {
+            $manifestStream.Write($manifestBytes, 0, $manifestBytes.Length)
+        } finally {
+            $manifestStream.Dispose()
+        }
+    }
+
+    if ($currentPart) {
+        $currentPart.Zip.Dispose()
+    }
+
+    return @($partPaths)
 }
 
 function Expand-ConfiguredPath {
@@ -681,6 +854,7 @@ $docsRoot = Join-Path $KitRoot "docs"
 $zipPath = Join-Path $KitRoot "codexkit-state.zip"
 $transferZipPath = Join-Path $KitRoot "codexkit-transfer.zip"
 $secureTransferPath = Join-Path $KitRoot "codexkit-transfer-secure.rar"
+$transferPartsRoot = Join-Path $KitRoot "codexkit-transfer-parts"
 $manifestPath = Join-Path $KitRoot "state-manifest.json"
 $hashesPath = Join-Path $KitRoot "archive-hashes.txt"
 $toolVersionsPath = Join-Path $KitRoot "tool-versions.json"
@@ -863,10 +1037,22 @@ $zipBuildPath = Join-Path $KitRoot "codexkit-state.__new.zip"
 if (Test-Path -LiteralPath $zipBuildPath) {
     Remove-Item -LiteralPath $zipBuildPath -Force -ErrorAction SilentlyContinue
 }
-Compress-Archive -Path $stateRoot -DestinationPath $zipBuildPath -Force
+$splitPartTargetBytes = [int64]1879048192
+$stateRootEstimatedBytes = Get-PathTotalBytes -Path $stateRoot
+$stateZipSkippedForSplit = $false
+if ($stateRootEstimatedBytes -gt $splitPartTargetBytes) {
+    $stateZipSkippedForSplit = $true
+    $effectiveStateZipPath = $null
+    if (Test-Path -LiteralPath $zipPath) {
+        Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
+    }
+    Write-Warning "Skipping codexkit-state.zip because the state folder is large. Split transfer parts will include the state folder directly."
+} else {
+    Compress-Archive -Path $stateRoot -DestinationPath $zipBuildPath -Force
+}
 
 Write-Step "Creating transfer archive"
-if (Test-Path -LiteralPath $zipPath) {
+if (-not $stateZipSkippedForSplit -and (Test-Path -LiteralPath $zipPath)) {
     try {
         Remove-Item -LiteralPath $zipPath -Force -ErrorAction Stop
         Move-Item -LiteralPath $zipBuildPath -Destination $zipPath -Force
@@ -874,11 +1060,13 @@ if (Test-Path -LiteralPath $zipPath) {
         $effectiveStateZipPath = $zipBuildPath
         Write-Warning "Could not replace existing codexkit-state.zip because it is locked. Using $effectiveStateZipPath for this run."
     }
-} else {
+} elseif (-not $stateZipSkippedForSplit) {
     Move-Item -LiteralPath $zipBuildPath -Destination $zipPath -Force
 }
 
 $effectiveTransferZipPath = $transferZipPath
+$transferPartPaths = @()
+$transferArchiveSplit = $false
 $transferZipBuildPath = Join-Path $KitRoot "codexkit-transfer.__new.zip"
 if (Test-Path -LiteralPath $transferZipBuildPath) {
     Remove-Item -LiteralPath $transferZipBuildPath -Force -ErrorAction SilentlyContinue
@@ -902,24 +1090,25 @@ $transferItems = @(
     $environmentInventoryPath,
     $docsRoot,
     $repoSnapshotsRoot,
-    $effectiveStateZipPath
+    $(if ($effectiveStateZipPath) { $effectiveStateZipPath } else { $stateRoot })
 ) | Where-Object { Test-Path -LiteralPath $_ }
-$targetFileSystem = Get-DriveFileSystem -Path $KitRoot
-$fat32LimitBytes = [int64]4294967295
 $transferItemsEstimatedBytes = [int64]0
 foreach ($item in $transferItems) {
     $transferItemsEstimatedBytes += Get-PathTotalBytes -Path $item
 }
 
-$transferArchiveSkipped = $false
-if ($targetFileSystem -eq "FAT32" -and $transferItemsEstimatedBytes -gt $fat32LimitBytes) {
-    $transferArchiveSkipped = $true
+if ($transferItemsEstimatedBytes -gt $splitPartTargetBytes) {
+    $transferArchiveSplit = $true
     $effectiveTransferZipPath = $null
     if (Test-Path -LiteralPath $transferZipPath) {
         Remove-Item -LiteralPath $transferZipPath -Force -ErrorAction SilentlyContinue
     }
-    Write-Warning "Skipping codexkit-transfer.zip: estimated content size is larger than the 4 GB FAT32 file limit. Use the CODEXKIT folder directly."
+    Write-Step "Creating split transfer archives"
+    $transferPartPaths = @(New-SplitTransferArchives -Items $transferItems -BaseRoot $KitRoot -PartsRoot $transferPartsRoot -PartTargetBytes $splitPartTargetBytes)
 } else {
+    if (Test-Path -LiteralPath $transferPartsRoot) {
+        Remove-Item -LiteralPath $transferPartsRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
     Compress-Archive -Path $transferItems -DestinationPath $transferZipBuildPath -Force
     if (Test-Path -LiteralPath $transferZipPath) {
         try {
@@ -941,16 +1130,17 @@ if (Test-Path -LiteralPath $legacySecureArchivePath) {
 
 if ($ArchivePassword) {
     $winRarPath = "C:\Program Files\WinRAR\WinRAR.exe"
-    if ($transferArchiveSkipped) {
-        Write-Warning "Skipping password-protected transfer archive for the same FAT32 size limit reason. Use the CODEXKIT folder directly."
-    } elseif (Test-Path -LiteralPath $winRarPath) {
+    if (Test-Path -LiteralPath $winRarPath) {
         Write-Step "Creating password-protected transfer archive"
-        if (Test-Path -LiteralPath $secureTransferPath) {
-            Remove-Item -LiteralPath $secureTransferPath -Force
-        }
-        & $winRarPath a -r "-hp$ArchivePassword" $secureTransferPath @transferItems | Out-Null
+        Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-secure*.rar" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+        $rarArgs = @("a", "-r", "-v3800m", "-hp$ArchivePassword", $secureTransferPath) + @($transferItems)
+        & $winRarPath @rarArgs | Out-Null
     } else {
-        Write-Warning "Archive password was provided, but WinRAR was not found. Skipping secure archive."
+        if ($transferArchiveSplit) {
+            Write-Warning "Archive password was provided, but WinRAR was not found. Split ZIP parts were created without password protection."
+        } else {
+            Write-Warning "Archive password was provided, but WinRAR was not found. Skipping secure archive."
+        }
     }
 }
 
@@ -960,17 +1150,24 @@ if ($effectiveStateZipPath -and (Test-Path -LiteralPath $effectiveStateZipPath))
     $zipHash = (Get-FileHash -LiteralPath $effectiveStateZipPath -Algorithm SHA256).Hash
     $hashLines.Add("$([System.IO.Path]::GetFileName($effectiveStateZipPath)) SHA256 $zipHash") | Out-Null
 }
-if (Test-Path -LiteralPath $effectiveTransferZipPath) {
+if ($effectiveTransferZipPath -and (Test-Path -LiteralPath $effectiveTransferZipPath)) {
     $transferZipHash = (Get-FileHash -LiteralPath $effectiveTransferZipPath -Algorithm SHA256).Hash
     $hashLines.Add("$([System.IO.Path]::GetFileName($effectiveTransferZipPath)) SHA256 $transferZipHash") | Out-Null
-} elseif ($transferArchiveSkipped) {
-    $hashLines.Add("codexkit-transfer.zip SKIPPED FAT32_4GB_LIMIT") | Out-Null
+} elseif ($transferArchiveSplit) {
+    $hashLines.Add("codexkit-transfer.zip SPLIT_INTO_PARTS") | Out-Null
+    foreach ($partPath in $transferPartPaths) {
+        if (Test-Path -LiteralPath $partPath) {
+            $partHash = (Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash
+            $hashLines.Add("codexkit-transfer-parts/$([System.IO.Path]::GetFileName($partPath)) SHA256 $partHash") | Out-Null
+        }
+    }
 }
-if (Test-Path -LiteralPath $secureTransferPath) {
-    $rarHash = (Get-FileHash -LiteralPath $secureTransferPath -Algorithm SHA256).Hash
-    $hashLines.Add("codexkit-transfer-secure.rar SHA256 $rarHash") | Out-Null
-} elseif ($transferArchiveSkipped -and $ArchivePassword) {
-    $hashLines.Add("codexkit-transfer-secure.rar SKIPPED FAT32_4GB_LIMIT") | Out-Null
+if ($stateZipSkippedForSplit) {
+    $hashLines.Add("codexkit-state.zip SKIPPED_SPLIT_TRANSFER_INCLUDES_STATE_FOLDER") | Out-Null
+}
+foreach ($securePart in @(Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-secure*.rar" -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
+    $rarHash = (Get-FileHash -LiteralPath $securePart.FullName -Algorithm SHA256).Hash
+    $hashLines.Add("$($securePart.Name) SHA256 $rarHash") | Out-Null
 }
 $hashLines | Set-Content -Path $hashesPath -Encoding UTF8
 
