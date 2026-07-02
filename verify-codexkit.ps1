@@ -13,9 +13,9 @@ function Get-CheckResult {
     )
 
     [pscustomobject]@{
-        Check   = $Name
-        Status  = if ($Ok) { "OK" } else { "MISSING" }
-        Details = $Details
+        Проверка = $Name
+        Статус   = if ($Ok) { "ОК" } else { "НЕТ" }
+        Детали   = $Details
     }
 }
 
@@ -26,7 +26,7 @@ function Test-CommandPresence {
         return Get-CheckResult -Name $Name -Ok $true -Details $command.Source
     }
 
-    return Get-CheckResult -Name $Name -Ok $false -Details "Not found in PATH"
+    return Get-CheckResult -Name $Name -Ok $false -Details "Не найдено в PATH"
 }
 
 function Get-DefaultWorkspaceRoot {
@@ -34,12 +34,12 @@ function Get-DefaultWorkspaceRoot {
 }
 
 $codexHistoryChecks = @(
-    @{ Name = ".codex sessions"; Path = (Join-Path $HOME ".codex\sessions") },
-    @{ Name = ".codex archived"; Path = (Join-Path $HOME ".codex\archived_sessions") },
-    @{ Name = ".codex history"; Path = (Join-Path $HOME ".codex\history.jsonl") },
-    @{ Name = ".codex memory db"; Path = (Join-Path $HOME ".codex\memories_1.sqlite") },
-    @{ Name = ".codex state db"; Path = (Join-Path $HOME ".codex\state_5.sqlite") },
-    @{ Name = ".codex session index"; Path = (Join-Path $HOME ".codex\session_index.jsonl") }
+    @{ Name = "сессии Codex"; Path = (Join-Path $HOME ".codex\sessions") },
+    @{ Name = "архив Codex"; Path = (Join-Path $HOME ".codex\archived_sessions") },
+    @{ Name = "история Codex"; Path = (Join-Path $HOME ".codex\history.jsonl") },
+    @{ Name = "память Codex"; Path = (Join-Path $HOME ".codex\memories_1.sqlite") },
+    @{ Name = "состояние Codex"; Path = (Join-Path $HOME ".codex\state_5.sqlite") },
+    @{ Name = "индекс сессий Codex"; Path = (Join-Path $HOME ".codex\session_index.jsonl") }
 )
 
 function Get-RepoLocationState {
@@ -77,11 +77,11 @@ foreach ($commandName in @("git", "code", "codex", "python", "java", "javac", "a
 $fileChecks = @(
     @{ Name = ".gitconfig"; Path = (Join-Path $HOME ".gitconfig") },
     @{ Name = ".ssh"; Path = (Join-Path $HOME ".ssh\mikrotik_shutdown_ed25519") },
-    @{ Name = ".android adb"; Path = (Join-Path $HOME ".android\adbkey") },
-    @{ Name = ".codex auth"; Path = (Join-Path $HOME ".codex\auth.json") },
-    @{ Name = "VS Code settings"; Path = (Join-Path $env:APPDATA "Code\User\settings.json") },
-    @{ Name = "Private vpn"; Path = (Join-Path $PrivateRestoreRoot "vpn") },
-    @{ Name = "Private signing"; Path = (Join-Path $PrivateRestoreRoot "android-signing") }
+    @{ Name = "ключ adb"; Path = (Join-Path $HOME ".android\adbkey") },
+    @{ Name = "авторизация Codex"; Path = (Join-Path $HOME ".codex\auth.json") },
+    @{ Name = "настройки VS Code"; Path = (Join-Path $env:APPDATA "Code\User\settings.json") },
+    @{ Name = "личные VPN-файлы"; Path = (Join-Path $PrivateRestoreRoot "vpn") },
+    @{ Name = "ключи подписи Android"; Path = (Join-Path $PrivateRestoreRoot "android-signing") }
 )
 
 foreach ($check in $fileChecks) {
@@ -112,6 +112,6 @@ if (Test-Path -LiteralPath $repoManifestPath) {
 
 $results | Format-Table -AutoSize
 
-if ($results.Status -contains "MISSING") {
+if ($results.Статус -contains "НЕТ") {
     exit 1
 }

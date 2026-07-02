@@ -9,6 +9,8 @@ state-manifest.json
 tool-versions.json
 vscode-extensions.txt
 winget-packages.json
+winget-export.log
+installers/
 codexkit-state.zip
 codexkit-state.__new.zip
 codexkit-transfer.zip

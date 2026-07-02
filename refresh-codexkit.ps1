@@ -33,7 +33,7 @@ function Clear-Dir {
 
     robocopy $emptyDir $Path /MIR /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
-        throw "robocopy mirror cleanup failed for $Path with exit code $LASTEXITCODE"
+        throw "Не удалось очистить папку через robocopy: $Path. Код выхода: $LASTEXITCODE"
     }
 
     Get-ChildItem -LiteralPath $Path -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -110,7 +110,7 @@ function Copy-DirIfExists {
     Ensure-Dir -Path $Destination
     robocopy $Source $Destination /E /XJ /FFT /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed for $Source -> $Destination with exit code $LASTEXITCODE"
+        throw "Не удалось скопировать папку через robocopy: $Source -> $Destination. Код выхода: $LASTEXITCODE"
     }
 
     return $true
@@ -158,7 +158,7 @@ function Copy-DirWithExclusions {
 
     robocopy @args | Out-Null
     if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed for $Source -> $Destination with exit code $LASTEXITCODE"
+        throw "Не удалось скопировать папку через robocopy: $Source -> $Destination. Код выхода: $LASTEXITCODE"
     }
 
     return $true
@@ -441,9 +441,173 @@ function Get-OptionalJsonConfig {
     try {
         return (Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json)
     } catch {
-        Write-Warning "Could not read JSON config ${Path}: $($_.Exception.Message)"
+        Write-Warning "Не удалось прочитать JSON-настройки ${Path}: $($_.Exception.Message)"
         return $null
     }
+}
+
+function ConvertTo-SafePackageId {
+    param([string]$PackageId)
+
+    if ([string]::IsNullOrWhiteSpace($PackageId)) {
+        return "unknown-package"
+    }
+
+    return (($PackageId -replace '[^A-Za-z0-9._-]', '_').Trim('_'))
+}
+
+function Get-PackageDisplayName {
+    param([pscustomobject]$Package)
+
+    if (($Package.PSObject.Properties.Name -contains "display_name") -and -not [string]::IsNullOrWhiteSpace([string]$Package.display_name)) {
+        return [string]$Package.display_name
+    }
+
+    return [string]$Package.id
+}
+
+function Get-OfflineInstallerFiles {
+    param([string]$PackageDir)
+
+    if (-not (Test-Path -LiteralPath $PackageDir)) {
+        return @()
+    }
+
+    $installerExtensions = @(".exe", ".msi", ".msix", ".msixbundle", ".appx", ".appxbundle", ".zip")
+    return @(Get-ChildItem -LiteralPath $PackageDir -Recurse -Force -File -ErrorAction SilentlyContinue |
+        Where-Object { $installerExtensions -contains $_.Extension.ToLowerInvariant() } |
+        Sort-Object Length -Descending)
+}
+
+function Save-OfflineInstallers {
+    param(
+        [string]$PackagesPath,
+        [string]$InstallersRoot,
+        [string]$ManifestPath,
+        [string]$KitRoot
+    )
+
+    Ensure-Dir -Path $InstallersRoot
+
+    $records = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $PackagesPath)) {
+        ([pscustomobject]@{
+            version      = 1
+            generated_at = (Get-Date).ToString("o")
+            packages     = @()
+        } | ConvertTo-Json -Depth 8) | Set-Content -Path $ManifestPath -Encoding UTF8
+        return
+    }
+
+    try {
+        $packages = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $PackagesPath -Raw | ConvertFrom-Json))
+    } catch {
+        Write-Warning "Не удалось прочитать список приложений для офлайн-установщиков: $($_.Exception.Message)"
+        return
+    }
+
+    $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
+    foreach ($package in $packages) {
+        $packageId = [string]$package.id
+        if ([string]::IsNullOrWhiteSpace($packageId)) {
+            continue
+        }
+
+        $displayName = Get-PackageDisplayName -Package $package
+        $safeId = ConvertTo-SafePackageId -PackageId $packageId
+        $packageDir = Join-Path $InstallersRoot $safeId
+        $logPath = Join-Path $packageDir "download.log"
+        $status = "missing"
+        $message = ""
+
+        Ensure-Dir -Path $packageDir
+        $installerFiles = @(Get-OfflineInstallerFiles -PackageDir $packageDir)
+
+        if ($installerFiles.Count -eq 0 -and $wingetCommand) {
+            Clear-Dir -Path $packageDir
+            Ensure-Dir -Path $packageDir
+            $logPath = Join-Path $packageDir "download.log"
+
+            $downloadArgs = @(
+                "download",
+                "--id", $packageId,
+                "--exact",
+                "--download-directory", $packageDir,
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+                "--disable-interactivity"
+            )
+
+            if (($package.PSObject.Properties.Name -contains "source") -and -not [string]::IsNullOrWhiteSpace([string]$package.source)) {
+                $downloadArgs += @("--source", [string]$package.source)
+                if ([string]$package.source -eq "msstore") {
+                    $downloadArgs += "--skip-license"
+                }
+            }
+
+            Write-Host "Скачиваю офлайн-установщик: $displayName" -ForegroundColor DarkGray
+            try {
+                & $wingetCommand.Source @downloadArgs *> $logPath
+                if ($LASTEXITCODE -ne 0) {
+                    $message = "winget download завершился с кодом $LASTEXITCODE"
+                    Write-Warning "Не удалось скачать офлайн-установщик для ${displayName}: $message"
+                }
+            } catch {
+                $message = $_.Exception.Message
+                Write-Warning "Не удалось скачать офлайн-установщик для ${displayName}: $message"
+            }
+        } elseif ($installerFiles.Count -eq 0 -and -not $wingetCommand) {
+            $message = "команда winget не найдена"
+        } else {
+            $status = "cached"
+        }
+
+        $allFiles = @(Get-ChildItem -LiteralPath $packageDir -Recurse -Force -File -ErrorAction SilentlyContinue)
+        $installerFiles = @(Get-OfflineInstallerFiles -PackageDir $packageDir)
+        if ($installerFiles.Count -gt 0 -and $status -ne "cached") {
+            $status = "downloaded"
+        } elseif ($installerFiles.Count -eq 0) {
+            $status = "unavailable"
+        }
+
+        $fileRecords = @($allFiles | Sort-Object FullName | ForEach-Object {
+            [pscustomobject]@{
+                path        = (Convert-ToRelativePath -Root $KitRoot -Path $_.FullName) -replace '\\', '/'
+                length      = [int64]$_.Length
+                sha256      = Get-FileSha256 -Path $_.FullName
+                is_installer = (@(".exe", ".msi", ".msix", ".msixbundle", ".appx", ".appxbundle", ".zip") -contains $_.Extension.ToLowerInvariant())
+            }
+        })
+
+        $packageSource = ""
+        if ($package.PSObject.Properties.Name -contains "source") {
+            $packageSource = [string]$package.source
+        }
+
+        $packageInstallByDefault = $false
+        if ($package.PSObject.Properties.Name -contains "install_by_default") {
+            $packageInstallByDefault = [bool]$package.install_by_default
+        }
+
+        $packageDirRelative = (Convert-ToRelativePath -Root $KitRoot -Path $packageDir) -replace '\\', '/'
+
+        $records.Add([pscustomobject]@{
+            id                 = $packageId
+            display_name       = $displayName
+            source             = $packageSource
+            install_by_default = $packageInstallByDefault
+            package_dir        = $packageDirRelative
+            status             = $status
+            message            = $message
+            files              = @($fileRecords)
+        }) | Out-Null
+    }
+
+    ([pscustomobject]@{
+        version      = 1
+        generated_at = (Get-Date).ToString("o")
+        packages     = @($records.ToArray())
+    } | ConvertTo-Json -Depth 8) | Set-Content -Path $ManifestPath -Encoding UTF8
 }
 
 function Get-CommandVersionInfo {
@@ -515,7 +679,7 @@ function Get-ConfiguredCopyEntries {
         $category = if ([string]::IsNullOrWhiteSpace([string]$entry.category)) { "custom" } else { [string]$entry.category }
 
         if ([string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($destinationRelative)) {
-            Write-Warning "Skipping invalid custom file entry in custom-paths.json because source or destination is empty."
+            Write-Warning "Пропускаю неверную запись файла в custom-paths.json: source или destination пустой."
             continue
         }
 
@@ -534,7 +698,7 @@ function Get-ConfiguredCopyEntries {
         $category = if ([string]::IsNullOrWhiteSpace([string]$entry.category)) { "custom" } else { [string]$entry.category }
 
         if ([string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($destinationRelative)) {
-            Write-Warning "Skipping invalid custom directory entry in custom-paths.json because source or destination is empty."
+            Write-Warning "Пропускаю неверную запись папки в custom-paths.json: source или destination пустой."
             continue
         }
 
@@ -966,7 +1130,7 @@ function Discover-RepoManifestEntries {
     $seenRepoPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($root in $Roots) {
-        Write-Host "Scanning repos under $root" -ForegroundColor DarkCyan
+        Write-Host "Ищу репозитории в $root" -ForegroundColor DarkCyan
 
         $gitDirs = Get-ChildItem -LiteralPath $root -Recurse -Force -Directory -Filter ".git" -ErrorAction SilentlyContinue
         foreach ($gitDir in $gitDirs) {
@@ -1089,11 +1253,11 @@ function Get-RepoManifestEntries {
         try {
             $existingRepos = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $RepoManifestPath -Raw | ConvertFrom-Json))
         } catch {
-            Write-Warning "Could not read repo-manifest.json: $($_.Exception.Message)"
+            Write-Warning "Не удалось прочитать repo-manifest.json: $($_.Exception.Message)"
         }
     }
 
-    Write-Step "Discovering work repository snapshots"
+    Write-Step "Поиск рабочих репозиториев"
     $discoveredRepos = @(ConvertTo-FlatObjectArray -Value (Discover-RepoManifestEntries -Roots $Roots -ExcludedPathPrefixes $ExcludedPathPrefixes))
     $mergedRepos = @(Merge-RepoManifestEntries -ExistingRepos $existingRepos -DiscoveredRepos $discoveredRepos)
     $mergedRepos | ConvertTo-Json -Depth 4 | Set-Content -Path $RepoManifestPath -Encoding UTF8
@@ -1488,6 +1652,8 @@ $environmentInventoryPath = Join-Path $KitRoot "environment-inventory.json"
 $workIndexJsonPath = Join-Path $docsRoot "codex-work-index.json"
 $workIndexMarkdownPath = Join-Path $docsRoot "codex-work-index.md"
 $bootstrapPackagesPath = Join-Path $KitRoot "bootstrap-packages.json"
+$installersRoot = Join-Path $KitRoot "installers"
+$offlineInstallersManifestPath = Join-Path $installersRoot "manifest.json"
 $repoManifestPath = Join-Path $KitRoot "repo-manifest.json"
 $customPathsConfigPath = Join-Path $KitRoot "custom-paths.json"
 
@@ -1505,7 +1671,7 @@ $effectiveRefreshMode = if ($RefreshMode -eq "Auto") {
 }
 $incrementalRefresh = ($effectiveRefreshMode -eq "Incremental")
 
-Write-Step "Refreshing state folder ($effectiveRefreshMode mode)"
+Write-Step "Обновление папки состояния (режим: $effectiveRefreshMode)"
 if ($incrementalRefresh) {
     Ensure-Dir -Path $stateRoot
     Ensure-Dir -Path $repoSnapshotsRoot
@@ -1515,7 +1681,7 @@ if ($incrementalRefresh) {
 }
 Ensure-Dir -Path $docsRoot
 
-Write-Step "Writing machine info"
+Write-Step "Запись информации о компьютере"
 $machineInfo = [pscustomobject]@{
     generated_at   = (Get-Date).ToString("o")
     source_machine = $env:COMPUTERNAME
@@ -1583,7 +1749,7 @@ foreach ($dirName in $codexPersistentDirs) {
     Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status $status
 }
 
-Write-Step "Capturing work repository snapshots"
+Write-Step "Сохранение снимков рабочих репозиториев"
 $repoExcludeDirs = @(
     ".gradle",
     ".idea",
@@ -1645,7 +1811,7 @@ foreach ($repo in $repoManifestEntries) {
     $sourcePath = [string]$repo.source_path
     $repoName = [string]$repo.name
     if ([string]::IsNullOrWhiteSpace($sourcePath) -or [string]::IsNullOrWhiteSpace($repoName)) {
-        Write-Warning "Skipping malformed repository manifest entry."
+        Write-Warning "Пропускаю некорректную запись репозитория в манифесте."
         continue
     }
 
@@ -1654,12 +1820,12 @@ foreach ($repo in $repoManifestEntries) {
     Add-ManifestEntry -Manifest $manifest -Category "repo-snapshot" -Source $sourcePath -Destination $snapshotPath -Status $status
 }
 
-Write-Step "Writing Codex work index"
+Write-Step "Запись индекса работ Codex"
 $codexWorkIndex = New-CodexWorkIndex -CodexHome (Join-Path $homeDir ".codex") -CodexDocumentsRoot (Join-Path $homeDir "Documents\Codex") -RepoManifestEntries $repoManifestEntries
 $codexWorkIndex | ConvertTo-Json -Depth 10 | Set-Content -Path $workIndexJsonPath -Encoding UTF8
 Write-CodexWorkIndexMarkdown -Index $codexWorkIndex -Path $workIndexMarkdownPath
 
-Write-Step "Writing environment inventory"
+Write-Step "Запись инвентаризации окружения"
 $environmentInventory = [pscustomobject]@{
     generated_at          = (Get-Date).ToString("o")
     source_machine        = $env:COMPUTERNAME
@@ -1680,7 +1846,7 @@ $environmentInventory = [pscustomobject]@{
 }
 $environmentInventory | ConvertTo-Json -Depth 6 | Set-Content -Path $environmentInventoryPath -Encoding UTF8
 
-Write-Step "Capturing tool versions"
+Write-Step "Сохранение версий инструментов"
 $toolVersions = @(
     Get-CommandVersionInfo -CommandName "git"
     Get-CommandVersionInfo -CommandName "gh"
@@ -1697,7 +1863,7 @@ $toolVersions = @(
 )
 $toolVersions | ConvertTo-Json -Depth 4 | Set-Content -Path $toolVersionsPath -Encoding UTF8
 
-Write-Step "Capturing VS Code extensions"
+Write-Step "Сохранение расширений VS Code"
 $codeCommand = Find-CodeCommand
 if ($codeCommand) {
     & $codeCommand --list-extensions --show-versions | Set-Content -Path $extensionsPath -Encoding UTF8
@@ -1705,32 +1871,35 @@ if ($codeCommand) {
     Set-Content -Path $extensionsPath -Value "# code command not found on source machine" -Encoding UTF8
 }
 
-Write-Step "Capturing winget package snapshot"
+Write-Step "Сохранение справочного списка установленных программ"
 $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
 if ($wingetCommand) {
     & $wingetCommand.Source export --output $wingetExportPath --accept-source-agreements --disable-interactivity *> $wingetExportLogPath
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "winget export reported a non-zero exit code: $LASTEXITCODE. Details: $wingetExportLogPath"
+        Write-Warning "winget export завершился с ненулевым кодом: $LASTEXITCODE. Подробности: $wingetExportLogPath"
         if (-not (Test-Path -LiteralPath $wingetExportPath)) {
             Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
         }
     } else {
-        Write-Host "winget snapshot saved. Full details: $wingetExportLogPath" -ForegroundColor DarkGray
+        Write-Host "Список winget сохранён. Подробности: $wingetExportLogPath" -ForegroundColor DarkGray
     }
 } else {
     Set-Content -Path $wingetExportPath -Value "[]" -Encoding UTF8
-    Set-Content -Path $wingetExportLogPath -Value "winget command not found on source machine" -Encoding UTF8
+    Set-Content -Path $wingetExportLogPath -Value "Команда winget не найдена на исходном компьютере." -Encoding UTF8
 }
 
-Write-Step "Writing state manifest"
+Write-Step "Скачивание офлайн-установщиков"
+Save-OfflineInstallers -PackagesPath $bootstrapPackagesPath -InstallersRoot $installersRoot -ManifestPath $offlineInstallersManifestPath -KitRoot $KitRoot
+
+Write-Step "Запись манифеста состояния"
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestPath -Encoding UTF8
 
-Write-Step "Normalizing archive timestamps"
+Write-Step "Нормализация дат файлов для архива"
 Normalize-ZipTimestamps -Root $stateRoot
 Normalize-ZipTimestamps -Root $repoSnapshotsRoot
 Normalize-ZipTimestamps -Root $docsRoot
 
-Write-Step "Creating zip archive"
+Write-Step "Создание ZIP-архива"
 $effectiveStateZipPath = $zipPath
 $zipBuildPath = Join-Path $KitRoot "codexkit-state.__new.zip"
 if (Test-Path -LiteralPath $zipBuildPath) {
@@ -1745,19 +1914,19 @@ if ($stateRootEstimatedBytes -gt $splitPartTargetBytes) {
     if (Test-Path -LiteralPath $zipPath) {
         Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
     }
-    Write-Warning "Skipping codexkit-state.zip because the state folder is large. Split transfer parts will include the state folder directly."
+    Write-Warning "Пропускаю codexkit-state.zip: папка state слишком большая. Разделённые части переноса включат state напрямую."
 } else {
     Compress-Archive -Path $stateRoot -DestinationPath $zipBuildPath -Force
 }
 
-Write-Step "Creating transfer archive"
+Write-Step "Создание переносимого архива"
 if (-not $stateZipSkippedForSplit -and (Test-Path -LiteralPath $zipPath)) {
     try {
         Remove-Item -LiteralPath $zipPath -Force -ErrorAction Stop
         Move-Item -LiteralPath $zipBuildPath -Destination $zipPath -Force
     } catch {
         $effectiveStateZipPath = $zipBuildPath
-        Write-Warning "Could not replace existing codexkit-state.zip because it is locked. Using $effectiveStateZipPath for this run."
+        Write-Warning "Не удалось заменить существующий codexkit-state.zip: файл занят. Для этого запуска используется $effectiveStateZipPath."
     }
 } elseif (-not $stateZipSkippedForSplit) {
     Move-Item -LiteralPath $zipBuildPath -Destination $zipPath -Force
@@ -1782,6 +1951,7 @@ $transferItems = @(
     $repoManifestPath,
     $wingetExportPath,
     $wingetExportLogPath,
+    $installersRoot,
     $toolVersionsPath,
     $extensionsPath,
     $hashesPath,
@@ -1803,7 +1973,7 @@ if ($transferItemsEstimatedBytes -gt $splitPartTargetBytes) {
     if (Test-Path -LiteralPath $transferZipPath) {
         Remove-Item -LiteralPath $transferZipPath -Force -ErrorAction SilentlyContinue
     }
-    Write-Step "Creating split transfer archives"
+    Write-Step "Создание разделённых частей переноса"
     $transferPartPaths = @(New-SplitTransferArchives -Items $transferItems -BaseRoot $KitRoot -PartsRoot $transferPartsRoot -PartTargetBytes $splitPartTargetBytes)
 } else {
     if (Test-Path -LiteralPath $transferPartsRoot) {
@@ -1816,7 +1986,7 @@ if ($transferItemsEstimatedBytes -gt $splitPartTargetBytes) {
             Move-Item -LiteralPath $transferZipBuildPath -Destination $transferZipPath -Force
         } catch {
             $effectiveTransferZipPath = $transferZipBuildPath
-            Write-Warning "Could not replace existing codexkit-transfer.zip because it is locked. Using $effectiveTransferZipPath for this run."
+            Write-Warning "Не удалось заменить существующий codexkit-transfer.zip: файл занят. Для этого запуска используется $effectiveTransferZipPath."
         }
     } else {
         Move-Item -LiteralPath $transferZipBuildPath -Destination $transferZipPath -Force
@@ -1831,20 +2001,20 @@ if (Test-Path -LiteralPath $legacySecureArchivePath) {
 if ($ArchivePassword) {
     $winRarPath = "C:\Program Files\WinRAR\WinRAR.exe"
     if (Test-Path -LiteralPath $winRarPath) {
-        Write-Step "Creating password-protected transfer archive"
+        Write-Step "Создание защищённого паролем архива"
         Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-secure*.rar" -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
         $rarArgs = @("a", "-r", "-v3800m", "-hp$ArchivePassword", $secureTransferPath) + @($transferItems)
         & $winRarPath @rarArgs | Out-Null
     } else {
         if ($transferArchiveSplit) {
-            Write-Warning "Archive password was provided, but WinRAR was not found. Split ZIP parts were created without password protection."
+            Write-Warning "Пароль указан, но WinRAR не найден. Разделённые ZIP-части созданы без парольной защиты."
         } else {
-            Write-Warning "Archive password was provided, but WinRAR was not found. Skipping secure archive."
+            Write-Warning "Пароль указан, но WinRAR не найден. Защищённый архив не создан."
         }
     }
 }
 
-Write-Step "Writing archive hashes"
+Write-Step "Запись хэшей архивов"
 $hashLines = New-Object System.Collections.Generic.List[string]
 if ($effectiveStateZipPath -and (Test-Path -LiteralPath $effectiveStateZipPath)) {
     $zipHash = Get-FileSha256 -Path $effectiveStateZipPath
@@ -1871,4 +2041,4 @@ foreach ($securePart in @(Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-
 }
 $hashLines | Set-Content -Path $hashesPath -Encoding UTF8
 
-Write-Step "CODEXKIT refresh complete"
+Write-Step "Сборка CODEXKIT завершена"

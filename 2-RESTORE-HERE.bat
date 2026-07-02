@@ -1,45 +1,46 @@
 @echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title CODEXKIT - Restore Here
+title CODEXKIT - восстановление
 color 0B
 
 echo ============================================
-echo   2. VOSSTANOVIT NA ETOM KOMPE
+echo   2. ВОССТАНОВИТЬ НА ЭТОМ КОМПЬЮТЕРЕ
 echo ============================================
 echo.
-echo Zapuskay ETOT fail na TOM kompjutere, na kotorom
-echo hochesh prodolzhit rabotu pryamo seychas.
+echo Запускай этот файл на том компьютере, где
+echo хочешь продолжить работу прямо сейчас.
 echo.
-echo Eto mozhet byt:
-echo - novyj komp
-echo - vremennyj noutbuk
-echo - etot staryj komp, kogda ty vernulsya obratno
+echo Это может быть:
+echo - новый компьютер
+echo - временный ноутбук
+echo - этот старый компьютер, когда ты вернулся обратно
 echo.
-echo Batnik snachala sam poprobuet nayti starye papki proektov.
-echo Esli naydet - obnovit ih na meste.
-echo Esli ne naydet - odin raz sprosit, kuda klast novye proekty.
+echo Файл сначала сам попробует найти старые папки проектов.
+echo Если найдёт — обновит их на месте.
+echo Если не найдёт — один раз спросит, куда сохранять новые проекты.
 echo.
 
 :WAIT_FOR_APPS_CLOSED
-powershell -NoProfile -Command "$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('Code','Codex') }; if ($p) { Write-Host ''; Write-Host 'Zakroy pered vosstanovleniem:' -ForegroundColor Yellow; $p | Sort-Object ProcessName,Id | Format-Table ProcessName,Id,MainWindowTitle -AutoSize; exit 1 }"
+powershell -NoProfile -Command "$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('Code','Codex') }; if ($p) { Write-Host ''; Write-Host 'Перед восстановлением закрой:' -ForegroundColor Yellow; $p | Sort-Object ProcessName,Id | Format-Table ProcessName,Id,MainWindowTitle -AutoSize; exit 1 }"
 if errorlevel 1 (
   echo.
-  echo Zakroy Codex i VS Code, potom nazhmi lyubuyu klavishu dlya povtornoj proverki.
-  echo Dlya otmeny mozhno prosto zakryt eto okno.
+  echo Закрой Codex и VS Code, потом нажми любую клавишу для повторной проверки.
+  echo Для отмены можно просто закрыть это окно.
   echo.
   pause >nul
   goto WAIT_FOR_APPS_CLOSED
 )
 
-echo Codex i VS Code zakryty. Mozhno prodolzhat.
+echo Codex и VS Code закрыты. Можно продолжать.
 echo.
 
 call :ENSURE_CODEXKIT_PAYLOAD
 set "BOOTSTRAP_EXITCODE=%ERRORLEVEL%"
 if not "%BOOTSTRAP_EXITCODE%"=="0" (
   echo.
-  echo OShIBKA RASPAKOVKI KOMPLEKTA. Kod: %BOOTSTRAP_EXITCODE%
+  echo ОШИБКА РАСПАКОВКИ КОМПЛЕКТА. Код: %BOOTSTRAP_EXITCODE%
   echo.
   pause
   exit /b %BOOTSTRAP_EXITCODE%
@@ -47,31 +48,31 @@ if not "%BOOTSTRAP_EXITCODE%"=="0" (
 
 if not exist "%~dp0restore-codexkit.ps1" (
   if exist "%~dp0CODEXKIT\2-RESTORE-HERE.bat" (
-    echo Komplekt raspakovan. Zapuskayu vosstanovlenie iz nego...
+    echo Комплект распакован. Запускаю восстановление из него...
     echo.
     call "%~dp0CODEXKIT\2-RESTORE-HERE.bat"
     exit /b %ERRORLEVEL%
   )
 
-  echo Ne nayden restore-codexkit.ps1 i ne poluchilos raspakovat komplekt.
-  echo Prover, chto ryadom est codexkit-transfer.zip ili papka codexkit-transfer-parts.
+  echo Не найден restore-codexkit.ps1 и не получилось распаковать комплект.
+  echo Проверь, что рядом есть codexkit-transfer.zip или папка codexkit-transfer-parts.
   echo.
   pause
   exit /b 1
 )
 
-echo Vosstanovlyayu rabochuyu sredu, proekty i nastroyki.
-echo Programmy budut predlozheny po odnoj: s korotkim opisaniem
-echo i podskazkoj, dlya kakih zadach oni mogut ponadobitsya.
-echo Polnyj spisok programm so starogo PK sohranitsya kak spravka.
+echo Восстанавливаю рабочую среду, проекты и настройки.
+echo Программы будут предложены по одной: с коротким описанием
+echo и подсказкой, для каких задач они могут понадобиться.
+echo Полный список программ со старого ПК сохранится как справка.
 echo.
 set "DEFAULT_PRIVATE=%USERPROFILE%\Documents\TravelRestore"
 set "DEFAULT_PROGRAMS=%SystemDrive%\TravelApps"
 
-set /p PRIVATE_ROOT=Kuda klast privatnye faily? [Enter = %DEFAULT_PRIVATE%]: 
+set /p PRIVATE_ROOT=Куда сохранять личные файлы? [Enter = %DEFAULT_PRIVATE%]:
 if "%PRIVATE_ROOT%"=="" set "PRIVATE_ROOT=%DEFAULT_PRIVATE%"
 
-set /p PROGRAMS_ROOT=Kuda pytatsya stavit programmy? [Enter = %DEFAULT_PROGRAMS%]: 
+set /p PROGRAMS_ROOT=Куда устанавливать программы? [Enter = %DEFAULT_PROGRAMS%]:
 if "%PROGRAMS_ROOT%"=="" set "PROGRAMS_ROOT=%DEFAULT_PROGRAMS%"
 
 echo.
@@ -81,23 +82,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore-codexkit.ps1" 
 set "RESTORE_EXITCODE=%ERRORLEVEL%"
 if not "%RESTORE_EXITCODE%"=="0" (
   echo.
-  echo OShIBKA VOSSTANOVLENIYa. Kod: %RESTORE_EXITCODE%
+  echo ОШИБКА ВОССТАНОВЛЕНИЯ. Код: %RESTORE_EXITCODE%
   echo.
   pause
   exit /b %RESTORE_EXITCODE%
 )
 
 echo.
-echo PROVERYAYU REZULTAT...
+echo ПРОВЕРЯЮ РЕЗУЛЬТАТ...
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0verify-codexkit.ps1" -PrivateRestoreRoot "%PRIVATE_ROOT%"
 set "VERIFY_EXITCODE=%ERRORLEVEL%"
 
 echo.
 if "%VERIFY_EXITCODE%"=="0" (
-  echo GOTOVO. Osnovnye proverki proydeny.
+  echo ГОТОВО. Основные проверки пройдены.
 ) else (
-  echo VOSSTANOVLENIE SDELANO, NO EShCHE EST CHTO PROVERIT. Kod: %VERIFY_EXITCODE%
+  echo ВОССТАНОВЛЕНИЕ ВЫПОЛНЕНО, НО ЕСТЬ ЧТО ПРОВЕРИТЬ. Код: %VERIFY_EXITCODE%
 )
 echo.
 pause
@@ -116,9 +117,9 @@ if not errorlevel 1 goto UNPACK_CODEXKIT_PAYLOAD
 exit /b 0
 
 :UNPACK_CODEXKIT_PAYLOAD
-echo Nayden perenosimyj arhiv. Raspakovyvayu shtatnymi sredstvami Windows...
+echo Найден переносимый архив. Распаковываю штатными средствами Windows...
 set "CODEXKIT_BOOTSTRAP_BAT=%~f0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $bat=$env:CODEXKIT_BOOTSTRAP_BAT; $marker=':CODEXKIT_BOOTSTRAP_PS'; $text=[System.IO.File]::ReadAllText($bat); $idx=$text.LastIndexOf($marker); if ($idx -lt 0) { throw 'CODEXKIT bootstrap marker is missing.' }; $script=$text.Substring($idx + $marker.Length); Invoke-Expression $script"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $bat=$env:CODEXKIT_BOOTSTRAP_BAT; $marker=':CODEXKIT_BOOTSTRAP_PS'; $text=[System.IO.File]::ReadAllText($bat,[System.Text.Encoding]::UTF8); $idx=$text.LastIndexOf($marker); if ($idx -lt 0) { throw 'Не найден встроенный блок распаковки CODEXKIT.' }; $script=$text.Substring($idx + $marker.Length); Invoke-Expression $script"
 exit /b %ERRORLEVEL%
 
 :CODEXKIT_BOOTSTRAP_PS
@@ -172,7 +173,7 @@ $singleArchive = Join-Path $root "codexkit-transfer.zip"
 $partsRoot = Join-Path $root "codexkit-transfer-parts"
 
 if (Test-Path -LiteralPath $singleArchive) {
-    Write-Host "Extracting codexkit-transfer.zip"
+    Write-Host "Распаковываю codexkit-transfer.zip"
     Expand-Archive -LiteralPath $singleArchive -DestinationPath $outputRoot -Force
     Restore-LargeFilesIfNeeded -Root $outputRoot
     return
@@ -186,11 +187,11 @@ if (Test-Path -LiteralPath $partsRoot) {
 }
 
 if ($parts.Count -eq 0) {
-    throw "No codexkit-transfer.zip or codexkit-transfer-part-*.zip files found."
+    throw "Не найден codexkit-transfer.zip или файлы codexkit-transfer-part-*.zip."
 }
 
 foreach ($part in $parts) {
-    Write-Host "Extracting $($part.Name)"
+    Write-Host "Распаковываю $($part.Name)"
     Expand-Archive -LiteralPath $part.FullName -DestinationPath $outputRoot -Force
 }
 Restore-LargeFilesIfNeeded -Root $outputRoot

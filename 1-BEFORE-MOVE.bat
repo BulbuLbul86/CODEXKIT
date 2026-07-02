@@ -1,38 +1,39 @@
 @echo off
+chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title CODEXKIT - Before Move
+title CODEXKIT - сбор комплекта
 color 0A
 
 echo ============================================
-echo   1. SOBRAT KOMPLEKT PERED PEREEZDOM
+echo   1. СОБРАТЬ КОМПЛЕКТ ПЕРЕД ПЕРЕЕЗДОМ
 echo ============================================
 echo.
-echo Zapuskay ETOT fail na TOM kompjutere, s kotorogo
-echo ty seychas uezzhaesh.
+echo Запускай этот файл на том компьютере, с которого
+echo сейчас переезжаешь.
 echo.
-echo On:
-echo - obnovit nastroyki i lokalnye dannye
-echo - pri povtornom zapuske obnovit tolko novoe i izmenennoe
-echo - sohranit naydennye nastroyki, dostupy, instrumenty i privatnye faily
-echo - sdelayet snimki rabochih repo dlya tochnogo pereezda
-echo - soberet perenosimyj komplekt dlya fleshki ili pochty
+echo Он:
+echo - обновит настройки и локальные данные
+echo - при повторном запуске добавит только новое и изменённое
+echo - сохранит найденные настройки, доступы, инструменты и личные файлы
+echo - сделает снимки рабочих репозиториев для точного переезда
+echo - соберёт переносимый комплект для флешки или почты
 echo.
 
 :WAIT_FOR_APPS_CLOSED
-powershell -NoProfile -Command "$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('Code','Codex') }; if ($p) { Write-Host ''; Write-Host 'Zakroy pered sborkoy:' -ForegroundColor Yellow; $p | Sort-Object ProcessName,Id | Format-Table ProcessName,Id,MainWindowTitle -AutoSize; exit 1 }"
+powershell -NoProfile -Command "$p = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('Code','Codex') }; if ($p) { Write-Host ''; Write-Host 'Перед сборкой закрой:' -ForegroundColor Yellow; $p | Sort-Object ProcessName,Id | Format-Table ProcessName,Id,MainWindowTitle -AutoSize; exit 1 }"
 if errorlevel 1 (
   echo.
-  echo Zakroy Codex i VS Code, potom nazhmi lyubuyu klavishu dlya povtornoj proverki.
-  echo Dlya otmeny mozhno prosto zakryt eto okno.
+  echo Закрой Codex и VS Code, потом нажми любую клавишу для повторной проверки.
+  echo Для отмены можно просто закрыть это окно.
   echo.
   pause >nul
   goto WAIT_FOR_APPS_CLOSED
 )
 
-echo Codex i VS Code zakryty. Mozhno sobirat komplekt.
+echo Codex и VS Code закрыты. Можно собирать комплект.
 echo.
-set /p ARCHIVE_PASSWORD=Esli nuzhen zashchishchennyj arhiv, vvedi parol (ili prosto Enter): 
+set /p ARCHIVE_PASSWORD=Если нужен защищённый архив, введи пароль или просто нажми Enter:
 echo.
 set "REFRESH_MODE=Auto"
 if not "%CODEXKIT_REFRESH_MODE%"=="" set "REFRESH_MODE=%CODEXKIT_REFRESH_MODE%"
@@ -46,36 +47,36 @@ if "%ARCHIVE_PASSWORD%"=="" (
 set "EXITCODE=%ERRORLEVEL%"
 echo.
 if "%EXITCODE%"=="0" (
-  echo GOTOVO.
+  echo ГОТОВО.
   echo.
-  echo Perenosi vsyu fleshku ili vsyu papku s etimi failami.
-  echo Na novom kompe zapusti tolko:
+  echo Переноси всю флешку или всю папку с этими файлами.
+  echo На новом компьютере запусти только:
   echo   2-RESTORE-HERE.bat
   if exist "%~dp0codexkit-transfer.zip" (
     echo.
-    echo Sozdan odin arhiv:
+    echo Создан один архив:
     echo   %~dp0codexkit-transfer.zip
-    echo Ego ne nado otkryvat rukami: vtoroj batnik sam ego raspakuet.
+    echo Его не нужно открывать руками: второй батник сам его распакует.
   ) else (
     if exist "%~dp0codexkit-transfer-parts" (
       echo.
-      echo Odin arhiv byl by slishkom bolshoy, poetomu sozdana papka chastej:
+      echo Один архив был бы слишком большим, поэтому создана папка частей:
       echo   %~dp0codexkit-transfer-parts
-      echo Vtoroj batnik sam soberyot ih obratno.
+      echo Второй батник сам соберёт их обратно.
     )
   )
   if not "%ARCHIVE_PASSWORD%"=="" (
     if exist "%~dp0codexkit-transfer-secure*.rar" (
       echo.
-      echo Sozdan zashchishchennyj arhiv ili ego chasti:
+      echo Создан защищённый архив или его части:
       echo   %~dp0codexkit-transfer-secure*.rar
     ) else (
       echo.
-      echo Zashchishchennyj arhiv ne sozdan. Ispolzuy obychnyj komplekt CODEXKIT.
+      echo Защищённый архив не создан. Используй обычный комплект CODEXKIT.
     )
   )
 ) else (
-  echo OShIBKA. Kod vykhoda: %EXITCODE%
+  echo ОШИБКА. Код выхода: %EXITCODE%
 )
 echo.
 pause

@@ -1,122 +1,122 @@
-[
+﻿[
   {
     "id": "Git.Git",
     "source": "winget",
     "display_name": "Git",
     "install_by_default": true,
-    "notes": "Version control and repository tools.",
-    "project_hint": "Needed for almost any code project, GitHub sync, branches, commits, and local repo recovery."
+    "notes": "Система контроля версий и инструменты для репозиториев.",
+    "project_hint": "Нужно почти для любого проекта с кодом: GitHub, ветки, коммиты и восстановление локальных репозиториев."
   },
   {
     "id": "Microsoft.VisualStudioCode",
     "source": "winget",
     "display_name": "Visual Studio Code",
     "install_by_default": true,
-    "notes": "Code editor used by many extensions and project workspaces.",
-    "project_hint": "Useful for editing web apps, Android support files, scripts, configs, and restored repositories."
+    "notes": "Редактор кода с расширениями и рабочими пространствами.",
+    "project_hint": "Полезно для веб-приложений, Android-файлов, скриптов, конфигов и восстановленных репозиториев."
   },
   {
     "id": "OpenAI.Codex",
     "source": "winget",
     "display_name": "Codex CLI",
     "install_by_default": true,
-    "notes": "Command-line Codex environment.",
-    "project_hint": "Useful when continuing coding tasks, repo fixes, automation work, and terminal-based Codex sessions."
+    "notes": "Командная среда Codex.",
+    "project_hint": "Полезно для продолжения задач по коду, исправления репозиториев, автоматизации и работы Codex из терминала."
   },
   {
     "id": "9PLM9XGG6VKS",
     "source": "msstore",
     "display_name": "Codex Desktop",
-    "install_by_default": true,
-    "notes": "Desktop Codex application from Microsoft Store.",
-    "project_hint": "Useful for restoring the same Codex workflow, chats, attachments, plugins, and local coding sessions."
+    "install_by_default": false,
+    "notes": "Настольное приложение Codex из Microsoft Store.",
+    "project_hint": "Полезно для привычного интерфейса Codex, но Store не всегда отдаёт офлайн-установщик. Если интернета нет, можно пропустить и продолжить через Codex CLI."
   },
   {
     "id": "Python.Python.3.11",
     "source": "winget",
     "display_name": "Python 3.11",
     "install_by_default": true,
-    "notes": "Python runtime and scripting toolchain.",
-    "project_hint": "Useful for automation scripts, data processing, AI tooling, backend utilities, and local test helpers."
+    "notes": "Среда выполнения Python и инструменты для скриптов.",
+    "project_hint": "Полезно для автоматизации, обработки данных, AI-инструментов, backend-утилит и локальных тестов."
   },
   {
     "id": "OpenJS.NodeJS.LTS",
     "source": "winget",
     "display_name": "Node.js LTS",
     "install_by_default": true,
-    "notes": "JavaScript runtime for npm/pnpm tooling.",
-    "project_hint": "Useful for web apps, React/Next projects, frontend builds, bots, and JS automation."
+    "notes": "Среда выполнения JavaScript для npm и pnpm.",
+    "project_hint": "Полезно для веб-приложений, React/Next-проектов, сборки фронтенда, ботов и JS-автоматизации."
   },
   {
     "id": "Microsoft.OpenJDK.17",
     "source": "winget",
     "display_name": "OpenJDK 17",
     "install_by_default": false,
-    "notes": "Java runtime and compiler.",
-    "project_hint": "Useful for Android/Gradle projects and Java-based build tools."
+    "notes": "Среда выполнения Java и компилятор.",
+    "project_hint": "Полезно для Android/Gradle-проектов и Java-инструментов сборки."
   },
   {
     "id": "Google.AndroidStudio",
     "source": "winget",
     "display_name": "Android Studio",
     "install_by_default": false,
-    "notes": "Android IDE and SDK manager.",
-    "project_hint": "Useful for Android application development, emulator setup, signing, Gradle sync, and APK/AAB builds."
+    "notes": "IDE для Android и менеджер SDK.",
+    "project_hint": "Полезно для разработки Android-приложений, эмулятора, подписи, Gradle-синхронизации и сборки APK/AAB."
   },
   {
     "id": "Google.PlatformTools",
     "source": "winget",
     "display_name": "Android Platform Tools",
     "install_by_default": false,
-    "notes": "adb, fastboot, and related Android command-line tools.",
-    "project_hint": "Useful for device testing, installing APKs, logcat, screenshots, and VPN app diagnostics on Android."
+    "notes": "adb, fastboot и другие Android-инструменты командной строки.",
+    "project_hint": "Полезно для тестов на устройстве, установки APK, logcat, скриншотов и диагностики Android/VPN-приложений."
   },
   {
     "id": "Docker.DockerDesktop",
     "source": "winget",
     "display_name": "Docker Desktop",
     "install_by_default": false,
-    "notes": "Container runtime and desktop management app.",
-    "project_hint": "Useful for local services, databases, backend stacks, AI tools, and reproducible dev environments."
+    "notes": "Контейнерная среда и приложение для управления Docker.",
+    "project_hint": "Полезно для локальных сервисов, баз данных, backend-стеков, AI-инструментов и воспроизводимых окружений."
   },
   {
     "id": "Microsoft.WindowsTerminal",
     "source": "winget",
     "display_name": "Windows Terminal",
     "install_by_default": true,
-    "notes": "Modern terminal for PowerShell, cmd, and shells.",
-    "project_hint": "Useful for all command-line work, Git, Codex CLI, build scripts, and diagnostics."
+    "notes": "Современный терминал для PowerShell, cmd и других оболочек.",
+    "project_hint": "Полезно для командной строки, Git, Codex CLI, сборочных скриптов и диагностики."
   },
   {
     "id": "Google.Chrome.EXE",
     "source": "winget",
     "display_name": "Google Chrome",
     "install_by_default": false,
-    "notes": "Browser for web testing and everyday access.",
-    "project_hint": "Useful for frontend testing, site debugging, browser automation, and checking web projects."
+    "notes": "Браузер для веб-тестов и обычной работы.",
+    "project_hint": "Полезно для frontend-тестов, отладки сайтов, браузерной автоматизации и проверки веб-проектов."
   },
   {
     "id": "AmneziaVPN.AmneziaVPN",
     "source": "winget",
     "display_name": "Amnezia VPN",
     "install_by_default": false,
-    "notes": "VPN desktop client.",
-    "project_hint": "Useful only if a project needs the same VPN access, private network, or tunnel diagnostics."
+    "notes": "Настольный VPN-клиент.",
+    "project_hint": "Нужно только если проекту требуется тот же VPN-доступ, частная сеть или диагностика туннелей."
   },
   {
     "id": "Yandex.Disk",
     "source": "winget",
     "display_name": "Yandex Disk",
     "install_by_default": false,
-    "notes": "Cloud file sync client.",
-    "project_hint": "Useful only if project files, documents, or shared assets live in Yandex Disk."
+    "notes": "Клиент облачной синхронизации файлов.",
+    "project_hint": "Нужно только если проектные файлы, документы или общие материалы лежат в Яндекс Диске."
   },
   {
     "id": "Telegram.TelegramDesktop",
     "source": "winget",
     "display_name": "Telegram Desktop",
     "install_by_default": false,
-    "notes": "Messenger desktop client.",
-    "project_hint": "Useful for projects where communication, bot testing, channels, or saved files depend on Telegram."
+    "notes": "Настольный клиент мессенджера.",
+    "project_hint": "Полезно для проектов, где нужны коммуникации, тестирование ботов, каналы или сохранённые файлы Telegram."
   }
 ]
