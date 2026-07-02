@@ -863,5 +863,6 @@ if ($script:ResolvedNewRepoRoot) {
 if (Test-Path -LiteralPath $codexBackupRoot) {
     Write-Host "Codex backups:   $codexBackupRoot"
 }
-Write-Host "Backups folder:  $(Join-Path (if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot } else { Get-DefaultWorkspaceRoot }) '_codexkit-backups')"
+$backupWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) { $WorkspaceRoot } else { Get-DefaultWorkspaceRoot }
+Write-Host "Backups folder:  $(Join-Path $backupWorkspaceRoot '_codexkit-backups')"
 Write-Host "Next check:      run .\\verify-codexkit.ps1"
