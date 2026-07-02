@@ -926,6 +926,332 @@ function Get-RepoManifestEntries {
     return $discoveredRepos
 }
 
+function ConvertTo-IndexText {
+    param(
+        [string]$Text,
+        [int]$MaxLength = 180
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return ""
+    }
+
+    $clean = $Text -replace '[\r\n\t]+', ' '
+    $clean = $clean -replace '\s{2,}', ' '
+    $clean = $clean.Trim()
+    if ($clean.Length -le $MaxLength) {
+        return $clean
+    }
+
+    return ($clean.Substring(0, [Math]::Max(0, $MaxLength - 3)) + "...")
+}
+
+function ConvertTo-MarkdownCell {
+    param([string]$Text)
+
+    $clean = ConvertTo-IndexText -Text $Text -MaxLength 140
+    if ([string]::IsNullOrWhiteSpace($clean)) {
+        return "-"
+    }
+
+    return ($clean -replace '\|', '\|')
+}
+
+function Read-JsonlObjects {
+    param(
+        [string]$Path,
+        [int]$MaxLines = 0
+    )
+
+    $objects = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $objects
+    }
+
+    $lineCount = 0
+    foreach ($line in (Get-Content -LiteralPath $Path -ErrorAction SilentlyContinue)) {
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $lineCount++
+        if ($MaxLines -gt 0 -and $lineCount -gt $MaxLines) {
+            break
+        }
+
+        try {
+            $objects.Add(($line | ConvertFrom-Json)) | Out-Null
+        } catch {
+            continue
+        }
+    }
+
+    return $objects
+}
+
+function Get-CodexSessionIndexEntries {
+    param([string]$CodexHome)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $sessionIndexPath = Join-Path $CodexHome "session_index.jsonl"
+    foreach ($entry in (Read-JsonlObjects -Path $sessionIndexPath)) {
+        $entries.Add([pscustomobject]@{
+            id          = [string]$entry.id
+            thread_name = ConvertTo-IndexText -Text ([string]$entry.thread_name) -MaxLength 180
+            updated_at  = [string]$entry.updated_at
+        }) | Out-Null
+    }
+
+    return $entries
+}
+
+function Get-CodexSessionFileEntries {
+    param(
+        [string]$CodexHome,
+        [hashtable]$ThreadNamesById
+    )
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $sessionRoots = @(
+        @{ Path = (Join-Path $CodexHome "sessions"); Kind = "active" },
+        @{ Path = (Join-Path $CodexHome "archived_sessions"); Kind = "archived" }
+    )
+
+    foreach ($root in $sessionRoots) {
+        if (-not (Test-Path -LiteralPath $root.Path -PathType Container)) {
+            continue
+        }
+
+        foreach ($file in @(Get-ChildItem -LiteralPath $root.Path -Recurse -Force -File -Filter "*.jsonl" -ErrorAction SilentlyContinue)) {
+            $metadata = $null
+            foreach ($lineObject in (Read-JsonlObjects -Path $file.FullName -MaxLines 80)) {
+                if ([string]$lineObject.type -eq "session_meta") {
+                    $metadata = $lineObject.payload
+                    break
+                }
+            }
+
+            $threadId = if ($metadata -and $metadata.id) { [string]$metadata.id } else { [System.IO.Path]::GetFileNameWithoutExtension($file.Name) }
+            $threadName = ""
+            if ($ThreadNamesById.ContainsKey($threadId)) {
+                $threadName = [string]$ThreadNamesById[$threadId]
+            }
+
+            $cwd = if ($metadata -and $metadata.cwd) { [string]$metadata.cwd } else { "" }
+            $entries.Add([pscustomobject]@{
+                id               = $threadId
+                parent_thread_id = if ($metadata -and $metadata.parent_thread_id) { [string]$metadata.parent_thread_id } else { "" }
+                thread_name      = $threadName
+                kind             = [string]$root.Kind
+                thread_source    = if ($metadata -and $metadata.thread_source) { [string]$metadata.thread_source } else { "" }
+                agent_nickname   = if ($metadata -and $metadata.agent_nickname) { [string]$metadata.agent_nickname } else { "" }
+                agent_role       = if ($metadata -and $metadata.agent_role) { [string]$metadata.agent_role } else { "" }
+                cwd              = $cwd
+                cwd_portable     = Get-PortableRestorePath -Path $cwd
+                file_path        = $file.FullName
+                file_portable    = Get-PortableRestorePath -Path $file.FullName
+                size_bytes       = [int64]$file.Length
+                created_at       = if ($metadata -and $metadata.timestamp) { [string]$metadata.timestamp } else { $file.CreationTimeUtc.ToString("o") }
+                updated_at       = $file.LastWriteTimeUtc.ToString("o")
+            }) | Out-Null
+        }
+    }
+
+    return @($entries | Sort-Object updated_at -Descending)
+}
+
+function Get-CodexOutputIndex {
+    param(
+        [string]$CodexDocumentsRoot,
+        [int]$MaxFiles = 2000
+    )
+
+    $directories = New-Object System.Collections.Generic.List[object]
+    $files = New-Object System.Collections.Generic.List[object]
+    if (-not (Test-Path -LiteralPath $CodexDocumentsRoot -PathType Container)) {
+        return [pscustomobject]@{
+            directories = @()
+            files       = @()
+        }
+    }
+
+    $outputDirs = @(Get-ChildItem -LiteralPath $CodexDocumentsRoot -Recurse -Force -Directory -Filter "outputs" -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)
+    foreach ($dir in $outputDirs) {
+        $dirFiles = @(Get-ChildItem -LiteralPath $dir.FullName -Recurse -Force -File -ErrorAction SilentlyContinue)
+        $totalBytes = [int64]0
+        foreach ($dirFile in $dirFiles) {
+            $totalBytes += [int64]$dirFile.Length
+        }
+
+        $directories.Add([pscustomobject]@{
+            path        = $dir.FullName
+            portable    = Get-PortableRestorePath -Path $dir.FullName
+            file_count  = $dirFiles.Count
+            total_bytes = $totalBytes
+            updated_at  = $dir.LastWriteTimeUtc.ToString("o")
+        }) | Out-Null
+    }
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $CodexDocumentsRoot -Recurse -Force -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match '\\outputs\\' } | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First $MaxFiles)) {
+        $files.Add([pscustomobject]@{
+            name       = $file.Name
+            extension  = $file.Extension
+            path       = $file.FullName
+            portable   = Get-PortableRestorePath -Path $file.FullName
+            size_bytes = [int64]$file.Length
+            updated_at = $file.LastWriteTimeUtc.ToString("o")
+        }) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        directories = @($directories.ToArray())
+        files       = @($files.ToArray())
+    }
+}
+
+function Get-RepoWorkIndexEntries {
+    param([object[]]$Repos)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $gitCommand = Get-Command git -ErrorAction SilentlyContinue
+
+    foreach ($repo in @($Repos)) {
+        $sourcePath = [string]$repo.source_path
+        $exists = -not [string]::IsNullOrWhiteSpace($sourcePath) -and (Test-Path -LiteralPath $sourcePath -PathType Container)
+        $statusLines = @()
+        $dirtyCount = 0
+        $branchLine = ""
+
+        if ($exists -and $gitCommand -and (Test-Path -LiteralPath (Join-Path $sourcePath ".git"))) {
+            try {
+                $statusLines = @(& $gitCommand.Source -C $sourcePath status --short --branch 2>$null)
+                if ($statusLines.Count -gt 0) {
+                    $branchLine = [string]$statusLines[0]
+                    $dirtyCount = @($statusLines | Select-Object -Skip 1).Count
+                }
+            } catch {
+                $statusLines = @()
+            }
+        }
+
+        $entries.Add([pscustomobject]@{
+            name          = [string]$repo.name
+            branch        = [string]$repo.branch
+            remote_url    = [string]$repo.url
+            source_path   = $sourcePath
+            portable      = Get-PortableRestorePath -Path $sourcePath
+            exists        = [bool]$exists
+            git_status    = ConvertTo-IndexText -Text $branchLine -MaxLength 220
+            dirty_count   = [int]$dirtyCount
+            status_sample = @($statusLines | Select-Object -Skip 1 -First 40 | ForEach-Object { ConvertTo-IndexText -Text ([string]$_) -MaxLength 220 })
+        }) | Out-Null
+    }
+
+    return @($entries | Sort-Object name)
+}
+
+function New-CodexWorkIndex {
+    param(
+        [string]$CodexHome,
+        [string]$CodexDocumentsRoot,
+        [object[]]$RepoManifestEntries
+    )
+
+    $sessionIndexEntries = @(Get-CodexSessionIndexEntries -CodexHome $CodexHome)
+    $threadNamesById = @{}
+    foreach ($entry in $sessionIndexEntries) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$entry.id)) {
+            $threadNamesById[[string]$entry.id] = [string]$entry.thread_name
+        }
+    }
+
+    $sessionFiles = @(Get-CodexSessionFileEntries -CodexHome $CodexHome -ThreadNamesById $threadNamesById)
+    $outputs = Get-CodexOutputIndex -CodexDocumentsRoot $CodexDocumentsRoot
+    $repoEntries = @(Get-RepoWorkIndexEntries -Repos $RepoManifestEntries)
+
+    return [pscustomobject]@{
+        version       = 1
+        generated_at  = (Get-Date).ToString("o")
+        source_machine = $env:COMPUTERNAME
+        source_user    = $env:USERNAME
+        notes          = @(
+            "This is an index only. Full Codex state, sessions and repository snapshots are stored elsewhere in the CODEXKIT package.",
+            "Chat bodies are not copied into this index to reduce accidental secret exposure."
+        )
+        counts         = [pscustomobject]@{
+            session_titles      = $sessionIndexEntries.Count
+            session_files       = $sessionFiles.Count
+            output_directories  = @($outputs.directories).Count
+            output_files_indexed = @($outputs.files).Count
+            repositories        = $repoEntries.Count
+            dirty_repositories  = @($repoEntries | Where-Object { $_.dirty_count -gt 0 }).Count
+        }
+        session_titles = $sessionIndexEntries
+        session_files  = $sessionFiles
+        outputs        = $outputs
+        repositories   = $repoEntries
+    }
+}
+
+function Write-CodexWorkIndexMarkdown {
+    param(
+        [object]$Index,
+        [string]$Path
+    )
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add("# CODEXKIT Work Index") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("Generated: $($Index.generated_at)") | Out-Null
+    $lines.Add("Machine: $($Index.source_machine)") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("This file is a searchable map of local Codex work. It indexes chat titles, session files, output artifacts and repository state without copying full chat bodies into the report.") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("## Summary") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("| Area | Count |") | Out-Null
+    $lines.Add("|---|---:|") | Out-Null
+    $lines.Add("| Chat titles | $($Index.counts.session_titles) |") | Out-Null
+    $lines.Add("| Session files | $($Index.counts.session_files) |") | Out-Null
+    $lines.Add("| Output folders | $($Index.counts.output_directories) |") | Out-Null
+    $lines.Add("| Output files indexed | $($Index.counts.output_files_indexed) |") | Out-Null
+    $lines.Add("| Repositories | $($Index.counts.repositories) |") | Out-Null
+    $lines.Add("| Repositories with local changes | $($Index.counts.dirty_repositories) |") | Out-Null
+    $lines.Add("") | Out-Null
+
+    $lines.Add("## Recent Chats") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("| Updated | Title | Thread | Workspace |") | Out-Null
+    $lines.Add("|---|---|---|---|") | Out-Null
+    foreach ($session in @($Index.session_files | Sort-Object updated_at -Descending | Select-Object -First 60)) {
+        $title = if ([string]::IsNullOrWhiteSpace([string]$session.thread_name)) { [string]$session.id } else { [string]$session.thread_name }
+        $lines.Add("| $(ConvertTo-MarkdownCell $session.updated_at) | $(ConvertTo-MarkdownCell $title) | $(ConvertTo-MarkdownCell $session.id) | $(ConvertTo-MarkdownCell $session.cwd_portable) |") | Out-Null
+    }
+    $lines.Add("") | Out-Null
+
+    $lines.Add("## Repositories") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("| Name | Branch | Local changes | Status | Path |") | Out-Null
+    $lines.Add("|---|---|---:|---|---|") | Out-Null
+    foreach ($repo in @($Index.repositories | Sort-Object @{ Expression = "dirty_count"; Descending = $true }, name | Select-Object -First 120)) {
+        $lines.Add("| $(ConvertTo-MarkdownCell $repo.name) | $(ConvertTo-MarkdownCell $repo.branch) | $($repo.dirty_count) | $(ConvertTo-MarkdownCell $repo.git_status) | $(ConvertTo-MarkdownCell $repo.portable) |") | Out-Null
+    }
+    $lines.Add("") | Out-Null
+
+    $lines.Add("## Recent Output Files") | Out-Null
+    $lines.Add("") | Out-Null
+    $lines.Add("| Updated | File | Size | Path |") | Out-Null
+    $lines.Add("|---|---|---:|---|") | Out-Null
+    foreach ($file in @($Index.outputs.files | Sort-Object updated_at -Descending | Select-Object -First 120)) {
+        $lines.Add("| $(ConvertTo-MarkdownCell $file.updated_at) | $(ConvertTo-MarkdownCell $file.name) | $($file.size_bytes) | $(ConvertTo-MarkdownCell $file.portable) |") | Out-Null
+    }
+    $lines.Add("") | Out-Null
+    $lines.Add("Full machine-readable index: `codex-work-index.json`.") | Out-Null
+
+    Ensure-Dir -Path (Split-Path -Parent $Path)
+    $lines | Set-Content -Path $Path -Encoding UTF8
+}
+
 $codexPersistentFiles = @(
     "config.toml",
     "auth.json",
@@ -984,6 +1310,8 @@ $extensionsPath = Join-Path $KitRoot "vscode-extensions.txt"
 $wingetExportPath = Join-Path $KitRoot "winget-packages.json"
 $machineInfoPath = Join-Path $KitRoot "machine-info.json"
 $environmentInventoryPath = Join-Path $KitRoot "environment-inventory.json"
+$workIndexJsonPath = Join-Path $docsRoot "codex-work-index.json"
+$workIndexMarkdownPath = Join-Path $docsRoot "codex-work-index.md"
 $bootstrapPackagesPath = Join-Path $KitRoot "bootstrap-packages.json"
 $repoManifestPath = Join-Path $KitRoot "repo-manifest.json"
 $customPathsConfigPath = Join-Path $KitRoot "custom-paths.json"
@@ -1092,6 +1420,11 @@ foreach ($repo in $repoManifestEntries) {
     Add-ManifestEntry -Manifest $manifest -Category "repo-snapshot" -Source $sourcePath -Destination $snapshotPath -Status $status
 }
 
+Write-Step "Writing Codex work index"
+$codexWorkIndex = New-CodexWorkIndex -CodexHome (Join-Path $homeDir ".codex") -CodexDocumentsRoot (Join-Path $homeDir "Documents\Codex") -RepoManifestEntries $repoManifestEntries
+$codexWorkIndex | ConvertTo-Json -Depth 10 | Set-Content -Path $workIndexJsonPath -Encoding UTF8
+Write-CodexWorkIndexMarkdown -Index $codexWorkIndex -Path $workIndexMarkdownPath
+
 Write-Step "Writing environment inventory"
 $environmentInventory = [pscustomobject]@{
     generated_at          = (Get-Date).ToString("o")
@@ -1101,6 +1434,11 @@ $environmentInventory = [pscustomobject]@{
     repos_detected        = @($repoManifestEntries).Count
     auto_files_detected   = @($detectedEnvironmentEntries.files).Count
     auto_dirs_detected    = @($detectedEnvironmentEntries.directories).Count
+    work_index            = [pscustomobject]@{
+        markdown = $workIndexMarkdownPath
+        json     = $workIndexJsonPath
+        counts   = $codexWorkIndex.counts
+    }
     copied_items          = @($manifest | Where-Object { $_.status -eq "copied" } | Select-Object category, source, destination, restore_destination)
     missing_items         = @($manifest | Where-Object { $_.status -eq "missing" } | Select-Object category, source, destination, restore_destination)
 }
