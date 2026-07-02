@@ -60,8 +60,9 @@ if not exist "%~dp0restore-codexkit.ps1" (
   exit /b 1
 )
 
-echo 1 - tolko rabochaya sreda i glavnye programmy
-echo 2 - plus pochti ves nabor programm cherez winget
+echo Vosstanovlyayu tolko rabochuyu sredu i osnovnye instrumenty.
+echo Polnyj spisok programm so starogo PK sohranitsya kak spravka,
+echo no igry, drajvery i sluchajnye prilozheniya ne stavyatsya avtomatom.
 echo.
 set "DEFAULT_PRIVATE=%USERPROFILE%\Documents\TravelRestore"
 set "DEFAULT_PROGRAMS=%SystemDrive%\TravelApps"
@@ -72,15 +73,9 @@ if "%PRIVATE_ROOT%"=="" set "PRIVATE_ROOT=%DEFAULT_PRIVATE%"
 set /p PROGRAMS_ROOT=Kuda pytatsya stavit programmy? [Enter = %DEFAULT_PROGRAMS%]: 
 if "%PROGRAMS_ROOT%"=="" set "PROGRAMS_ROOT=%DEFAULT_PROGRAMS%"
 
-set "RESTORE_MODE=1"
-set /p RESTORE_MODE=Vyberi rezhim [1 po umolchaniyu / 2 polnyj]: 
 echo.
 
-if "%RESTORE_MODE%"=="2" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore-codexkit.ps1" -PrivateRestoreRoot "%PRIVATE_ROOT%" -ProgramsRoot "%PROGRAMS_ROOT%" -FullDesktop
-) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore-codexkit.ps1" -PrivateRestoreRoot "%PRIVATE_ROOT%" -ProgramsRoot "%PROGRAMS_ROOT%"
-)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0restore-codexkit.ps1" -PrivateRestoreRoot "%PRIVATE_ROOT%" -ProgramsRoot "%PROGRAMS_ROOT%"
 
 set "RESTORE_EXITCODE=%ERRORLEVEL%"
 if not "%RESTORE_EXITCODE%"=="0" (

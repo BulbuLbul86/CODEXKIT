@@ -2,76 +2,91 @@
   {
     "id": "Git.Git",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Required for repository cloning and daily development."
   },
   {
     "id": "Microsoft.VisualStudioCode",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Primary editor restore target."
   },
   {
     "id": "OpenAI.Codex",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Codex CLI."
   },
   {
     "id": "9PLM9XGG6VKS",
     "source": "msstore",
+    "install_by_default": true,
     "notes": "Codex desktop app from Microsoft Store."
   },
   {
     "id": "Python.Python.3.11",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Python runtime."
   },
   {
     "id": "OpenJS.NodeJS.LTS",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Node.js for JS tooling and pnpm."
   },
   {
     "id": "Microsoft.OpenJDK.17",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Java toolchain for Android builds."
   },
   {
     "id": "Google.AndroidStudio",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Android development IDE."
   },
   {
     "id": "Google.PlatformTools",
     "source": "winget",
+    "install_by_default": false,
     "notes": "adb and related Android tools."
   },
   {
     "id": "Docker.DockerDesktop",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Container workflows."
   },
   {
     "id": "Microsoft.WindowsTerminal",
     "source": "winget",
+    "install_by_default": true,
     "notes": "Terminal environment."
   },
   {
     "id": "Google.Chrome.EXE",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Default browser."
   },
   {
     "id": "AmneziaVPN.AmneziaVPN",
     "source": "winget",
+    "install_by_default": false,
     "notes": "VPN desktop client."
   },
   {
     "id": "Yandex.Disk",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Cloud sync client."
   },
   {
     "id": "Telegram.TelegramDesktop",
     "source": "winget",
+    "install_by_default": false,
     "notes": "Messenger used in the current setup."
   }
 ]

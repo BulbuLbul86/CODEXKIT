@@ -650,6 +650,10 @@ $codexBackupRoot = Join-Path $travelKitStateDir "backups\codex-home"
 
 Expand-TransferPayloadIfNeeded -KitRoot $kitRoot -StateRoot $stateRoot -StateZipPath $zipPath
 
+if ($FullDesktop) {
+    Write-Warning "FullDesktop mode is deprecated. CODEXKIT restores only curated workspace tools automatically; full app inventory stays in winget-packages.json for reference."
+}
+
 if (Test-Path -LiteralPath $machineInfoPath) {
     try {
         $machineInfo = Get-Content -LiteralPath $machineInfoPath -Raw | ConvertFrom-Json
@@ -667,28 +671,20 @@ if (-not (Test-Path -LiteralPath $stateRoot) -and (Test-Path -LiteralPath $zipPa
 if (-not $SkipWinget) {
     $wingetPath = Find-CommandPath -Name "winget" -Fallback $null
     if (-not $wingetPath) {
-        throw "winget is required on the destination machine."
-    }
-
-    if (Test-Path -LiteralPath $bootstrapPackagesPath) {
+        Write-Warning "winget was not found. Program installation will be skipped, but data and project restore will continue."
+    } elseif (Test-Path -LiteralPath $bootstrapPackagesPath) {
         Write-Step "Installing critical packages"
         $packages = Get-Content -LiteralPath $bootstrapPackagesPath -Raw | ConvertFrom-Json
+        $skippedOptionalPackages = 0
         foreach ($package in $packages) {
+            if (($package.PSObject.Properties.Name -contains "install_by_default") -and (-not [bool]$package.install_by_default)) {
+                $skippedOptionalPackages += 1
+                continue
+            }
             Install-WingetPackage -Package $package -ProgramsRoot $ProgramsRoot
         }
-    }
-
-    if ($FullDesktop -and (Test-Path -LiteralPath $wingetExportPath)) {
-        Write-Step "Importing full desktop package snapshot"
-        & winget import `
-            --import-file $wingetExportPath `
-            --ignore-unavailable `
-            --ignore-versions `
-            --accept-package-agreements `
-            --accept-source-agreements `
-            --disable-interactivity
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "winget import reported a non-zero exit code: $LASTEXITCODE"
+        if ($skippedOptionalPackages -gt 0) {
+            Write-Host "Skipped $skippedOptionalPackages optional packages. Full old-PC app inventory is saved in winget-packages.json." -ForegroundColor DarkGray
         }
     }
 }
