@@ -121,7 +121,7 @@ function Copy-DirIfExists {
     }
 
     Ensure-Dir -Path $Destination
-    robocopy $Source $Destination /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $Source $Destination /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy failed for $Source -> $Destination with exit code $LASTEXITCODE"
     }
@@ -140,7 +140,7 @@ function Mirror-Dir {
     }
 
     Ensure-Dir -Path $Destination
-    robocopy $Source $Destination /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $Source $Destination /MIR /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy mirror failed for $Source -> $Destination with exit code $LASTEXITCODE"
     }
@@ -161,7 +161,7 @@ function Backup-DirIfExists {
     Ensure-Dir -Path $BackupRoot
     $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
     $backupPath = Join-Path $BackupRoot ("{0}-{1}" -f (Split-Path -Leaf $Source), $timestamp)
-    robocopy $Source $backupPath /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $Source $backupPath /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy backup failed for $Source -> $backupPath with exit code $LASTEXITCODE"
     }
@@ -204,7 +204,7 @@ function Backup-StateItemIfExists {
     $item = Get-Item -LiteralPath $Path -Force
 
     if ($item.PSIsContainer) {
-        robocopy $Path $backupPath /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+        robocopy $Path $backupPath /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
         if ($LASTEXITCODE -ge 8) {
             throw "robocopy backup failed for $Path -> $backupPath with exit code $LASTEXITCODE"
         }
@@ -717,7 +717,7 @@ if (-not $SkipState) {
             }
             if (Test-Path -LiteralPath $destinationDir) {
                 $backupDir = Join-Path $codexBackupSessionRoot $dirName
-                robocopy $destinationDir $backupDir /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+                robocopy $destinationDir $backupDir /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
                 if ($LASTEXITCODE -ge 8) {
                     throw "robocopy backup failed for $destinationDir -> $backupDir with exit code $LASTEXITCODE"
                 }

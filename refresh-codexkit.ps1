@@ -29,7 +29,7 @@ function Clear-Dir {
         Get-ChildItem -LiteralPath $emptyDir -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    robocopy $emptyDir $Path /MIR /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $emptyDir $Path /MIR /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy mirror cleanup failed for $Path with exit code $LASTEXITCODE"
     }
@@ -52,6 +52,23 @@ function Copy-FileIfExists {
     return $true
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
 function Copy-DirIfExists {
     param(
         [string]$Source,
@@ -63,7 +80,7 @@ function Copy-DirIfExists {
     }
 
     Ensure-Dir -Path $Destination
-    robocopy $Source $Destination /E /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
+    robocopy $Source $Destination /E /XJ /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS | Out-Null
     if ($LASTEXITCODE -ge 8) {
         throw "robocopy failed for $Source -> $Destination with exit code $LASTEXITCODE"
     }
@@ -89,6 +106,7 @@ function Copy-DirWithExclusions {
         $Source,
         $Destination,
         "/E",
+        "/XJ",
         "/R:1",
         "/W:1",
         "/NFL",
@@ -257,6 +275,7 @@ function New-SplitTransferArchives {
         [int64]$PartTargetBytes
     )
 
+    Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     Clear-Dir -Path $PartsRoot
 
@@ -538,7 +557,12 @@ function Test-SkippedDriveRepoFolderName {
         'venv',
         'dist',
         'build',
-        '.next'
+        '.next',
+        'CODEXKIT',
+        'travel-kit',
+        'repo-snapshots',
+        'codexkit-transfer-parts',
+        'codexkit-large-files'
     )
 
     if ($excludedNames -contains $Name) {
@@ -546,6 +570,47 @@ function Test-SkippedDriveRepoFolderName {
     }
 
     return ($Name -match '^[0-9a-f]{12,}$')
+}
+
+function Test-SkippedRepoPath {
+    param(
+        [string]$Path,
+        [string[]]$ExcludedPathPrefixes = @()
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $true
+    }
+
+    foreach ($excludedPrefix in $ExcludedPathPrefixes) {
+        if (-not [string]::IsNullOrWhiteSpace($excludedPrefix) -and $Path.StartsWith($excludedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    $pathParts = @($Path -split '[\\/]') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    $skippedParts = @(
+        'CODEXKIT',
+        'travel-kit',
+        'repo-snapshots',
+        'codexkit-transfer-parts',
+        'codexkit-large-files',
+        'node_modules',
+        '.gradle',
+        '.venv',
+        'venv',
+        'dist',
+        'build',
+        '.next'
+    )
+
+    foreach ($part in $pathParts) {
+        if ($skippedParts -contains $part) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 function Find-GitRepoPathsBounded {
@@ -872,19 +937,11 @@ function Discover-RepoManifestEntries {
         $gitDirs = Get-ChildItem -LiteralPath $root -Recurse -Force -Directory -Filter ".git" -ErrorAction SilentlyContinue
         foreach ($gitDir in $gitDirs) {
             $repoPath = Split-Path -Parent $gitDir.FullName
-            if ([string]::IsNullOrWhiteSpace($repoPath)) {
+            if ([string]::IsNullOrWhiteSpace($repoPath) -or (Test-SkippedRepoPath -Path $repoPath -ExcludedPathPrefixes $ExcludedPathPrefixes)) {
                 continue
             }
 
-            $skip = $false
-            foreach ($excludedPrefix in $ExcludedPathPrefixes) {
-                if (-not [string]::IsNullOrWhiteSpace($excludedPrefix) -and $repoPath.StartsWith($excludedPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                    $skip = $true
-                    break
-                }
-            }
-
-            if ($skip -or -not $seenRepoPaths.Add($repoPath)) {
+            if (-not $seenRepoPaths.Add($repoPath)) {
                 continue
             }
 
@@ -1405,12 +1462,51 @@ $repoExcludeDirs = @(
     "node_modules",
     "dist",
     "out",
+    "output",
+    "outputs",
+    "target",
+    "models",
+    "checkpoints",
+    "weights",
+    "datasets",
+    "data",
+    "cache",
+    ".cache",
+    "tmp",
+    "temp",
+    "input",
+    "downloads",
     ".cxx",
-    ".externalNativeBuild"
+    ".externalNativeBuild",
+    "__pycache__",
+    ".pytest_cache"
 )
 $repoExcludeFiles = @(
     "local.properties",
-    "Thumbs.db"
+    "Thumbs.db",
+    "*.img",
+    "*.iso",
+    "*.apk",
+    "*.aab",
+    "*.apks",
+    "*.obb",
+    "*.bin",
+    "*.zip",
+    "*.7z",
+    "*.rar",
+    "*.tar",
+    "*.gz",
+    "*.xz",
+    "*.safetensors",
+    "*.ckpt",
+    "*.pt",
+    "*.pth",
+    "*.onnx",
+    "*.gguf",
+    "*.pb",
+    "*.tflite",
+    "*.h5",
+    "*.weights"
 )
 $repoManifestEntries = @(Get-RepoManifestEntries -RepoManifestPath $repoManifestPath -Roots $repoRoots -ExcludedPathPrefixes @($stateRoot, $repoSnapshotsRoot, $KitRoot))
 foreach ($repo in $repoManifestEntries) {
@@ -1607,17 +1703,17 @@ if ($ArchivePassword) {
 Write-Step "Writing archive hashes"
 $hashLines = New-Object System.Collections.Generic.List[string]
 if ($effectiveStateZipPath -and (Test-Path -LiteralPath $effectiveStateZipPath)) {
-    $zipHash = (Get-FileHash -LiteralPath $effectiveStateZipPath -Algorithm SHA256).Hash
+    $zipHash = Get-FileSha256 -Path $effectiveStateZipPath
     $hashLines.Add("$([System.IO.Path]::GetFileName($effectiveStateZipPath)) SHA256 $zipHash") | Out-Null
 }
 if ($effectiveTransferZipPath -and (Test-Path -LiteralPath $effectiveTransferZipPath)) {
-    $transferZipHash = (Get-FileHash -LiteralPath $effectiveTransferZipPath -Algorithm SHA256).Hash
+    $transferZipHash = Get-FileSha256 -Path $effectiveTransferZipPath
     $hashLines.Add("$([System.IO.Path]::GetFileName($effectiveTransferZipPath)) SHA256 $transferZipHash") | Out-Null
 } elseif ($transferArchiveSplit) {
     $hashLines.Add("codexkit-transfer.zip SPLIT_INTO_PARTS") | Out-Null
     foreach ($partPath in $transferPartPaths) {
         if (Test-Path -LiteralPath $partPath) {
-            $partHash = (Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash
+            $partHash = Get-FileSha256 -Path $partPath
             $hashLines.Add("codexkit-transfer-parts/$([System.IO.Path]::GetFileName($partPath)) SHA256 $partHash") | Out-Null
         }
     }
@@ -1626,7 +1722,7 @@ if ($stateZipSkippedForSplit) {
     $hashLines.Add("codexkit-state.zip SKIPPED_SPLIT_TRANSFER_INCLUDES_STATE_FOLDER") | Out-Null
 }
 foreach ($securePart in @(Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-secure*.rar" -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
-    $rarHash = (Get-FileHash -LiteralPath $securePart.FullName -Algorithm SHA256).Hash
+    $rarHash = Get-FileSha256 -Path $securePart.FullName
     $hashLines.Add("$($securePart.Name) SHA256 $rarHash") | Out-Null
 }
 $hashLines | Set-Content -Path $hashesPath -Encoding UTF8
