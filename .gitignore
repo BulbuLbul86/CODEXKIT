@@ -1,0 +1,12 @@
+﻿state/
+repo-snapshots/
+docs/
+archive-hashes.txt
+machine-info.json
+state-manifest.json
+tool-versions.json
+codexkit-state.zip
+codexkit-state.__new.zip
+codexkit-transfer.zip
+codexkit-transfer.__new.zip
+codexkit-transfer-secure.rar

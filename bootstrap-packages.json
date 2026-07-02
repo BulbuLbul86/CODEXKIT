@@ -1,0 +1,77 @@
+[
+  {
+    "id": "Git.Git",
+    "source": "winget",
+    "notes": "Required for repository cloning and daily development."
+  },
+  {
+    "id": "Microsoft.VisualStudioCode",
+    "source": "winget",
+    "notes": "Primary editor restore target."
+  },
+  {
+    "id": "OpenAI.Codex",
+    "source": "winget",
+    "notes": "Codex CLI."
+  },
+  {
+    "id": "9PLM9XGG6VKS",
+    "source": "msstore",
+    "notes": "Codex desktop app from Microsoft Store."
+  },
+  {
+    "id": "Python.Python.3.11",
+    "source": "winget",
+    "notes": "Python runtime."
+  },
+  {
+    "id": "OpenJS.NodeJS.LTS",
+    "source": "winget",
+    "notes": "Node.js for JS tooling and pnpm."
+  },
+  {
+    "id": "Microsoft.OpenJDK.17",
+    "source": "winget",
+    "notes": "Java toolchain for Android builds."
+  },
+  {
+    "id": "Google.AndroidStudio",
+    "source": "winget",
+    "notes": "Android development IDE."
+  },
+  {
+    "id": "Google.PlatformTools",
+    "source": "winget",
+    "notes": "adb and related Android tools."
+  },
+  {
+    "id": "Docker.DockerDesktop",
+    "source": "winget",
+    "notes": "Container workflows."
+  },
+  {
+    "id": "Microsoft.WindowsTerminal",
+    "source": "winget",
+    "notes": "Terminal environment."
+  },
+  {
+    "id": "Google.Chrome.EXE",
+    "source": "winget",
+    "notes": "Default browser."
+  },
+  {
+    "id": "AmneziaVPN.AmneziaVPN",
+    "source": "winget",
+    "notes": "VPN desktop client."
+  },
+  {
+    "id": "Yandex.Disk",
+    "source": "winget",
+    "notes": "Cloud sync client."
+  },
+  {
+    "id": "Telegram.TelegramDesktop",
+    "source": "winget",
+    "notes": "Messenger used in the current setup."
+  }
+]
