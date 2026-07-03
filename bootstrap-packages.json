@@ -1,4 +1,4 @@
-﻿[
+[
   {
     "id": "Git.Git",
     "source": "winget",
@@ -13,7 +13,7 @@
     "display_name": "Visual Studio Code",
     "install_by_default": true,
     "notes": "Редактор кода с расширениями и рабочими пространствами.",
-    "project_hint": "Полезно для веб-приложений, Android-файлов, скриптов, конфигов и восстановленных репозиториев."
+    "project_hint": "Полезно для веб-приложений, скриптов, конфигов и восстановленных репозиториев."
   },
   {
     "id": "OpenAI.Codex",
@@ -37,7 +37,7 @@
     "display_name": "Python 3.11",
     "install_by_default": true,
     "notes": "Среда выполнения Python и инструменты для скриптов.",
-    "project_hint": "Полезно для автоматизации, обработки данных, AI-инструментов, backend-утилит и локальных тестов."
+    "project_hint": "Полезно для автоматизации, обработки данных, backend-утилит и локальных тестов."
   },
   {
     "id": "OpenJS.NodeJS.LTS",
@@ -45,7 +45,7 @@
     "display_name": "Node.js LTS",
     "install_by_default": true,
     "notes": "Среда выполнения JavaScript для npm и pnpm.",
-    "project_hint": "Полезно для веб-приложений, React/Next-проектов, сборки фронтенда, ботов и JS-автоматизации."
+    "project_hint": "Полезно для веб-приложений, сборки фронтенда, ботов и JS-автоматизации."
   },
   {
     "id": "Microsoft.OpenJDK.17",
@@ -53,7 +53,7 @@
     "display_name": "OpenJDK 17",
     "install_by_default": false,
     "notes": "Среда выполнения Java и компилятор.",
-    "project_hint": "Полезно для Android/Gradle-проектов и Java-инструментов сборки."
+    "project_hint": "Полезно для Java/Gradle-проектов и инструментов сборки."
   },
   {
     "id": "Google.AndroidStudio",
@@ -61,7 +61,7 @@
     "display_name": "Android Studio",
     "install_by_default": false,
     "notes": "IDE для Android и менеджер SDK.",
-    "project_hint": "Полезно для разработки Android-приложений, эмулятора, подписи, Gradle-синхронизации и сборки APK/AAB."
+    "project_hint": "Полезно для разработки Android-приложений, эмулятора, Gradle-синхронизации и сборки APK/AAB."
   },
   {
     "id": "Google.PlatformTools",
@@ -69,7 +69,7 @@
     "display_name": "Android Platform Tools",
     "install_by_default": false,
     "notes": "adb, fastboot и другие Android-инструменты командной строки.",
-    "project_hint": "Полезно для тестов на устройстве, установки APK, logcat, скриншотов и диагностики Android/VPN-приложений."
+    "project_hint": "Полезно для тестов на устройстве, установки APK, logcat, скриншотов и диагностики Android-проектов."
   },
   {
     "id": "Docker.DockerDesktop",
@@ -77,7 +77,7 @@
     "display_name": "Docker Desktop",
     "install_by_default": false,
     "notes": "Контейнерная среда и приложение для управления Docker.",
-    "project_hint": "Полезно для локальных сервисов, баз данных, backend-стеков, AI-инструментов и воспроизводимых окружений."
+    "project_hint": "Полезно для локальных сервисов, баз данных, backend-стеков и воспроизводимых окружений."
   },
   {
     "id": "Microsoft.WindowsTerminal",
@@ -94,29 +94,5 @@
     "install_by_default": false,
     "notes": "Браузер для веб-тестов и обычной работы.",
     "project_hint": "Полезно для frontend-тестов, отладки сайтов, браузерной автоматизации и проверки веб-проектов."
-  },
-  {
-    "id": "AmneziaVPN.AmneziaVPN",
-    "source": "winget",
-    "display_name": "Amnezia VPN",
-    "install_by_default": false,
-    "notes": "Настольный VPN-клиент.",
-    "project_hint": "Нужно только если проекту требуется тот же VPN-доступ, частная сеть или диагностика туннелей."
-  },
-  {
-    "id": "Yandex.Disk",
-    "source": "winget",
-    "display_name": "Yandex Disk",
-    "install_by_default": false,
-    "notes": "Клиент облачной синхронизации файлов.",
-    "project_hint": "Нужно только если проектные файлы, документы или общие материалы лежат в Яндекс Диске."
-  },
-  {
-    "id": "Telegram.TelegramDesktop",
-    "source": "winget",
-    "display_name": "Telegram Desktop",
-    "install_by_default": false,
-    "notes": "Настольный клиент мессенджера.",
-    "project_hint": "Полезно для проектов, где нужны коммуникации, тестирование ботов, каналы или сохранённые файлы Telegram."
   }
 ]
