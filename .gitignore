@@ -22,3 +22,32 @@ codexkit-run-statistics.latest.log
 CODEXKIT/
 CODEXKIT-unpacked/
 .serena/
+
+# local secrets and environment
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.db
+
+# local test/cache/log artifacts
+*.log
+*.trx
+Pester.TestResults.xml
+TestResults/
+test-results/
+coverage/
+.pytest_cache/
+__pycache__/
+*.pyc
+.coverage
+logs/
+cache/
+exports/
+.venv/
+venv/
