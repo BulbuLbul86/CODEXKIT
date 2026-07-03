@@ -1,4 +1,4 @@
-$repoRoot = Split-Path -Parent $PSScriptRoot
+﻿$repoRoot = Split-Path -Parent $PSScriptRoot
 
 . (Join-Path $repoRoot "prepublish-check.ps1")
 . (Join-Path $repoRoot "refresh-codexkit.ps1")
