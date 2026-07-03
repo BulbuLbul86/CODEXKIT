@@ -2,7 +2,9 @@
     [string]$KitRoot = (Split-Path -Parent $PSCommandPath),
     [string]$ArchivePassword,
     [ValidateSet("Auto", "Full", "Incremental")]
-    [string]$RefreshMode = "Auto"
+    [string]$RefreshMode = "Auto",
+    [ValidateSet("Safe", "Full")]
+    [string]$SensitivityMode = "Safe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -76,6 +78,171 @@ function Get-FileSha256 {
     }
 }
 
+function Get-StringSha256 {
+    param([string]$Value)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Value)
+        $hashBytes = $sha256.ComputeHash($bytes)
+        return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+    } finally {
+        $sha256.Dispose()
+    }
+}
+
+function Get-ShortStableHash {
+    param(
+        [string]$Value,
+        [int]$Length = 12
+    )
+
+    $hash = Get-StringSha256 -Value $Value
+    return $hash.Substring(0, [Math]::Min($Length, $hash.Length))
+}
+
+function ConvertTo-SafeName {
+    param([string]$Name)
+
+    if ([string]::IsNullOrWhiteSpace($Name)) {
+        return "unnamed"
+    }
+
+    return (($Name -replace '[^A-Za-z0-9._-]', '_').Trim('_'))
+}
+
+function Get-RepoSnapshotId {
+    param(
+        [string]$Name,
+        [string]$SourcePath
+    )
+
+    $safeName = ConvertTo-SafeName -Name $Name
+    $normalizedPath = ([string]$SourcePath).Trim().TrimEnd('\', '/').ToLowerInvariant()
+    if ([string]::IsNullOrWhiteSpace($normalizedPath)) {
+        $normalizedPath = $safeName.ToLowerInvariant()
+    }
+
+    return ("{0}__{1}" -f $safeName, (Get-ShortStableHash -Value $normalizedPath))
+}
+
+function Remove-PathIfExists {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+function Test-SensitiveCopyEntry {
+    param(
+        [string]$Category,
+        [string]$Source,
+        [string]$Destination
+    )
+
+    $categoryText = ([string]$Category).ToLowerInvariant()
+    $sourceText = (([string]$Source) -replace '/', '\').ToLowerInvariant()
+    $destinationText = (([string]$Destination) -replace '/', '\').ToLowerInvariant()
+    $combined = "$sourceText|$destinationText"
+
+    if ($categoryText -in @("ssh", "android-signing", "auto-docker", "auto-kubernetes", "auto-cloud", "auto-github", "auto-nuget")) {
+        return $true
+    }
+
+    $sensitiveFragments = @(
+        "\.ssh",
+        "\.git-credentials",
+        "\.npmrc",
+        "\.yarnrc",
+        "\.yarnrc.yml",
+        "\.pnpmrc",
+        "\.pypirc",
+        "\pip\pip.ini",
+        "\nuget\nuget.config",
+        "\.m2\settings.xml",
+        "\.gradle\gradle.properties",
+        "\.docker",
+        "\.kube",
+        "\.aws",
+        "\.azure",
+        "\.config\gcloud",
+        "\.codex\auth.json",
+        "\android\adbkey",
+        "\android\debug.keystore",
+        "\.android\adbkey",
+        "\.android\debug.keystore"
+    )
+
+    foreach ($fragment in $sensitiveFragments) {
+        if ($combined.Contains($fragment)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-CustomCopyEntry {
+    param([object]$Entry)
+
+    if ($Entry -is [hashtable]) {
+        return ($Entry.ContainsKey("IsCustom") -and [bool]$Entry.IsCustom)
+    }
+
+    if ($null -ne $Entry -and ($Entry.PSObject.Properties.Name -contains "IsCustom")) {
+        return [bool]$Entry.IsCustom
+    }
+
+    return $false
+}
+
+function Test-SensitiveCodexFileName {
+    param([string]$Name)
+
+    $sensitiveNames = @(
+        "auth.json",
+        "installation_id",
+        ".codex-global-state.json",
+        ".codex-global-state.json.bak",
+        "cap_sid",
+        "history.jsonl",
+        "session_index.jsonl",
+        "goals_1.sqlite",
+        "goals_1.sqlite-shm",
+        "goals_1.sqlite-wal",
+        "logs_2.sqlite",
+        "logs_2.sqlite-shm",
+        "logs_2.sqlite-wal",
+        "memories_1.sqlite",
+        "state_5.sqlite",
+        "state_5.sqlite-shm",
+        "state_5.sqlite-wal"
+    )
+
+    return ([string]$Name) -in $sensitiveNames
+}
+
+function Test-SensitiveCodexDirectoryName {
+    param([string]$Name)
+
+    $sensitiveNames = @(
+        "sessions",
+        "archived_sessions",
+        "attachments",
+        "codex-remote-attachments",
+        "generated_images",
+        "memories",
+        "state",
+        "sqlite",
+        "browser"
+    )
+
+    return ([string]$Name) -in $sensitiveNames
+}
+
 function Test-FileCopyRequired {
     param(
         [string]$Source,
@@ -95,6 +262,43 @@ function Test-FileCopyRequired {
 
     $timeDeltaSeconds = [Math]::Abs(($sourceItem.LastWriteTimeUtc - $destinationItem.LastWriteTimeUtc).TotalSeconds)
     return ($timeDeltaSeconds -gt 2)
+}
+
+function Write-TransferHashFile {
+    param(
+        [string]$Path,
+        [string[]]$Files,
+        [string]$BaseRoot
+    )
+
+    $existingFiles = @($Files | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($existingFiles.Count -eq 0) {
+        if (Test-Path -LiteralPath $Path) {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+        }
+        return
+    }
+
+    $base = (Resolve-Path -LiteralPath $BaseRoot).Path
+    if (-not $base.EndsWith("\")) {
+        $base += "\"
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    foreach ($file in ($existingFiles | Sort-Object)) {
+        $fullPath = (Resolve-Path -LiteralPath $file).Path
+        $relativePath = if ($fullPath.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $fullPath.Substring($base.Length)
+        } else {
+            Split-Path -Leaf $fullPath
+        }
+
+        $relativePath = $relativePath.Replace('\', '/')
+        $lines.Add("$(Get-FileSha256 -Path $fullPath)  $relativePath") | Out-Null
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    [System.IO.File]::WriteAllLines($Path, [string[]]$lines.ToArray(), $utf8NoBom)
 }
 
 function Copy-DirIfExists {
@@ -688,6 +892,7 @@ function Get-ConfiguredCopyEntries {
             Category    = $category
             Source      = $source
             Destination = (Join-Path $baseRoot $destinationRelative)
+            IsCustom    = $true
         }) | Out-Null
     }
 
@@ -707,6 +912,7 @@ function Get-ConfiguredCopyEntries {
             Category    = $category
             Source      = $source
             Destination = (Join-Path $baseRoot $destinationRelative)
+            IsCustom    = $true
         }) | Out-Null
     }
 
@@ -1144,8 +1350,10 @@ function Discover-RepoManifestEntries {
             }
 
             $metadata = Get-GitRepoMetadata -RepoPath $repoPath
+            $repoName = Split-Path -Leaf $repoPath
             $repos.Add([pscustomobject]@{
-                name        = (Split-Path -Leaf $repoPath)
+                name        = $repoName
+                snapshot_id = Get-RepoSnapshotId -Name $repoName -SourcePath $repoPath
                 url         = $metadata.url
                 branch      = $metadata.branch
                 source_path = $repoPath
@@ -1197,7 +1405,6 @@ function Merge-RepoManifestEntries {
 
     $merged = New-Object System.Collections.Generic.List[object]
     $seenSourcePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
-    $seenNames = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($repo in (ConvertTo-FlatObjectArray -Value $ExistingRepos)) {
         if ($null -eq $repo) {
@@ -1209,9 +1416,8 @@ function Merge-RepoManifestEntries {
             $seenSourcePaths.Add($sourceKey) | Out-Null
         }
 
-        $name = [string]$repo.name
-        if (-not [string]::IsNullOrWhiteSpace($name)) {
-            $seenNames.Add($name) | Out-Null
+        if (-not ($repo.PSObject.Properties.Name -contains "snapshot_id") -or [string]::IsNullOrWhiteSpace([string]$repo.snapshot_id)) {
+            $repo | Add-Member -NotePropertyName "snapshot_id" -NotePropertyValue (Get-RepoSnapshotId -Name ([string]$repo.name) -SourcePath ([string]$repo.source_path)) -Force
         }
 
         $merged.Add($repo) | Out-Null
@@ -1223,16 +1429,16 @@ function Merge-RepoManifestEntries {
         }
 
         $sourceKey = Get-RepoSourceKey -Repo $repo
-        $name = [string]$repo.name
-        if (($sourceKey -and $seenSourcePaths.Contains($sourceKey)) -or (-not [string]::IsNullOrWhiteSpace($name) -and $seenNames.Contains($name))) {
+        if ($sourceKey -and $seenSourcePaths.Contains($sourceKey)) {
             continue
         }
 
         if ($sourceKey) {
             $seenSourcePaths.Add($sourceKey) | Out-Null
         }
-        if (-not [string]::IsNullOrWhiteSpace($name)) {
-            $seenNames.Add($name) | Out-Null
+
+        if (-not ($repo.PSObject.Properties.Name -contains "snapshot_id") -or [string]::IsNullOrWhiteSpace([string]$repo.snapshot_id)) {
+            $repo | Add-Member -NotePropertyName "snapshot_id" -NotePropertyValue (Get-RepoSnapshotId -Name ([string]$repo.name) -SourcePath ([string]$repo.source_path)) -Force
         }
 
         $merged.Add($repo) | Out-Null
@@ -1590,6 +1796,10 @@ function Write-CodexWorkIndexMarkdown {
     $lines | Set-Content -Path $Path -Encoding UTF8
 }
 
+if ($MyInvocation.InvocationName -eq ".") {
+    return
+}
+
 $codexPersistentFiles = @(
     "config.toml",
     "auth.json",
@@ -1641,6 +1851,9 @@ $zipPath = Join-Path $KitRoot "codexkit-state.zip"
 $transferZipPath = Join-Path $KitRoot "codexkit-transfer.zip"
 $secureTransferPath = Join-Path $KitRoot "codexkit-transfer-secure.rar"
 $transferPartsRoot = Join-Path $KitRoot "codexkit-transfer-parts"
+$transferZipHashPath = Join-Path $KitRoot "codexkit-transfer.zip.sha256"
+$transferPartsHashPath = Join-Path $KitRoot "codexkit-transfer-parts.sha256"
+$secureTransferHashPath = Join-Path $KitRoot "codexkit-transfer-secure.sha256"
 $manifestPath = Join-Path $KitRoot "state-manifest.json"
 $hashesPath = Join-Path $KitRoot "archive-hashes.txt"
 $toolVersionsPath = Join-Path $KitRoot "tool-versions.json"
@@ -1688,6 +1901,7 @@ $machineInfo = [pscustomobject]@{
     source_user    = $env:USERNAME
     source_home    = $homeDir
     refresh_mode   = $effectiveRefreshMode
+    sensitivity_mode = $SensitivityMode
 }
 $machineInfo | ConvertTo-Json -Depth 4 | Set-Content -Path $machineInfoPath -Encoding UTF8
 
@@ -1710,6 +1924,12 @@ foreach ($entry in $configuredCopyEntries.files) {
 }
 
 foreach ($entry in $copyFiles) {
+    if ($SensitivityMode -eq "Safe" -and -not (Test-CustomCopyEntry -Entry $entry) -and (Test-SensitiveCopyEntry -Category $entry.Category -Source $entry.Source -Destination $entry.Destination)) {
+        Remove-PathIfExists -Path $entry.Destination
+        Add-ManifestEntry -Manifest $manifest -Category $entry.Category -Source $entry.Source -Destination $entry.Destination -Status "skipped-sensitive"
+        continue
+    }
+
     $status = if (Copy-FileIfExists -Source $entry.Source -Destination $entry.Destination -Incremental:$incrementalRefresh) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category $entry.Category -Source $entry.Source -Destination $entry.Destination -Status $status
 }
@@ -1717,6 +1937,12 @@ foreach ($entry in $copyFiles) {
 foreach ($fileName in $codexPersistentFiles) {
     $source = Join-Path $homeDir ".codex\$fileName"
     $destination = Join-Path $stateRoot "codex\$fileName"
+    if ($SensitivityMode -eq "Safe" -and ((Test-SensitiveCodexFileName -Name $fileName) -or (Test-SensitiveCopyEntry -Category "codex-history" -Source $source -Destination $destination))) {
+        Remove-PathIfExists -Path $destination
+        Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status "skipped-sensitive"
+        continue
+    }
+
     $status = if (Copy-FileIfExists -Source $source -Destination $destination -Incremental:$incrementalRefresh) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status $status
 }
@@ -1738,6 +1964,12 @@ foreach ($entry in $configuredCopyEntries.directories) {
 }
 
 foreach ($entry in $copyDirs) {
+    if ($SensitivityMode -eq "Safe" -and -not (Test-CustomCopyEntry -Entry $entry) -and (Test-SensitiveCopyEntry -Category $entry.Category -Source $entry.Source -Destination $entry.Destination)) {
+        Remove-PathIfExists -Path $entry.Destination
+        Add-ManifestEntry -Manifest $manifest -Category $entry.Category -Source $entry.Source -Destination $entry.Destination -Status "skipped-sensitive"
+        continue
+    }
+
     $status = if (Copy-DirIfExists -Source $entry.Source -Destination $entry.Destination) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category $entry.Category -Source $entry.Source -Destination $entry.Destination -Status $status
 }
@@ -1745,6 +1977,12 @@ foreach ($entry in $copyDirs) {
 foreach ($dirName in $codexPersistentDirs) {
     $source = Join-Path $homeDir ".codex\$dirName"
     $destination = Join-Path $stateRoot "codex\$dirName"
+    if ($SensitivityMode -eq "Safe" -and (Test-SensitiveCodexDirectoryName -Name $dirName)) {
+        Remove-PathIfExists -Path $destination
+        Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status "skipped-sensitive"
+        continue
+    }
+
     $status = if (Copy-DirIfExists -Source $source -Destination $destination) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "codex-history" -Source $source -Destination $destination -Status $status
 }
@@ -1815,7 +2053,12 @@ foreach ($repo in $repoManifestEntries) {
         continue
     }
 
-    $snapshotPath = Join-Path $repoSnapshotsRoot $repoName
+    $snapshotId = if (($repo.PSObject.Properties.Name -contains "snapshot_id") -and -not [string]::IsNullOrWhiteSpace([string]$repo.snapshot_id)) {
+        [string]$repo.snapshot_id
+    } else {
+        Get-RepoSnapshotId -Name $repoName -SourcePath $sourcePath
+    }
+    $snapshotPath = Join-Path $repoSnapshotsRoot $snapshotId
     $status = if (Copy-DirWithExclusions -Source $sourcePath -Destination $snapshotPath -ExcludeDirs $repoExcludeDirs -ExcludeFiles $repoExcludeFiles) { "copied" } else { "missing" }
     Add-ManifestEntry -Manifest $manifest -Category "repo-snapshot" -Source $sourcePath -Destination $snapshotPath -Status $status
 }
@@ -1832,6 +2075,7 @@ $environmentInventory = [pscustomobject]@{
     source_user           = $env:USERNAME
     requested_refresh_mode = $RefreshMode
     refresh_mode          = $effectiveRefreshMode
+    sensitivity_mode      = $SensitivityMode
     repo_search_roots     = @($repoRoots)
     repos_detected        = @($repoManifestEntries).Count
     auto_files_detected   = @($detectedEnvironmentEntries.files).Count
@@ -1939,10 +2183,20 @@ $transferZipBuildPath = Join-Path $KitRoot "codexkit-transfer.__new.zip"
 if (Test-Path -LiteralPath $transferZipBuildPath) {
     Remove-Item -LiteralPath $transferZipBuildPath -Force -ErrorAction SilentlyContinue
 }
+foreach ($oldHashPath in @($hashesPath, $transferZipHashPath, $transferPartsHashPath, $secureTransferHashPath)) {
+    if (Test-Path -LiteralPath $oldHashPath) {
+        Remove-Item -LiteralPath $oldHashPath -Force -ErrorAction SilentlyContinue
+    }
+}
 $transferItems = @(
     (Join-Path $KitRoot "1-BEFORE-MOVE.bat"),
     (Join-Path $KitRoot "2-RESTORE-HERE.bat"),
     (Join-Path $KitRoot "README.md"),
+    (Join-Path $KitRoot "SECURITY.md"),
+    (Join-Path $KitRoot "PRIVACY.md"),
+    (Join-Path $KitRoot "CHANGELOG.md"),
+    (Join-Path $KitRoot "CONTRIBUTING.md"),
+    (Join-Path $KitRoot "prepublish-check.ps1"),
     (Join-Path $KitRoot "refresh-codexkit.ps1"),
     (Join-Path $KitRoot "restore-codexkit.ps1"),
     (Join-Path $KitRoot "verify-codexkit.ps1"),
@@ -1954,7 +2208,6 @@ $transferItems = @(
     $installersRoot,
     $toolVersionsPath,
     $extensionsPath,
-    $hashesPath,
     $manifestPath,
     $machineInfoPath,
     $environmentInventoryPath,
@@ -2023,6 +2276,7 @@ if ($effectiveStateZipPath -and (Test-Path -LiteralPath $effectiveStateZipPath))
 if ($effectiveTransferZipPath -and (Test-Path -LiteralPath $effectiveTransferZipPath)) {
     $transferZipHash = Get-FileSha256 -Path $effectiveTransferZipPath
     $hashLines.Add("$([System.IO.Path]::GetFileName($effectiveTransferZipPath)) SHA256 $transferZipHash") | Out-Null
+    Write-TransferHashFile -Path $transferZipHashPath -Files @($effectiveTransferZipPath) -BaseRoot $KitRoot
 } elseif ($transferArchiveSplit) {
     $hashLines.Add("codexkit-transfer.zip SPLIT_INTO_PARTS") | Out-Null
     foreach ($partPath in $transferPartPaths) {
@@ -2031,6 +2285,7 @@ if ($effectiveTransferZipPath -and (Test-Path -LiteralPath $effectiveTransferZip
             $hashLines.Add("codexkit-transfer-parts/$([System.IO.Path]::GetFileName($partPath)) SHA256 $partHash") | Out-Null
         }
     }
+    Write-TransferHashFile -Path $transferPartsHashPath -Files $transferPartPaths -BaseRoot $KitRoot
 }
 if ($stateZipSkippedForSplit) {
     $hashLines.Add("codexkit-state.zip SKIPPED_SPLIT_TRANSFER_INCLUDES_STATE_FOLDER") | Out-Null
@@ -2039,6 +2294,7 @@ foreach ($securePart in @(Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-
     $rarHash = Get-FileSha256 -Path $securePart.FullName
     $hashLines.Add("$($securePart.Name) SHA256 $rarHash") | Out-Null
 }
+Write-TransferHashFile -Path $secureTransferHashPath -Files @((Get-ChildItem -LiteralPath $KitRoot -Filter "codexkit-transfer-secure*.rar" -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { $_.FullName })) -BaseRoot $KitRoot
 $hashLines | Set-Content -Path $hashesPath -Encoding UTF8
 
 Write-Step "Сборка CODEXKIT завершена"

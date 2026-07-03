@@ -35,13 +35,21 @@ echo Codex и VS Code закрыты. Можно собирать комплек
 echo.
 set /p ARCHIVE_PASSWORD=Если нужен защищённый архив, введи пароль или просто нажми Enter:
 echo.
+set "SENSITIVITY_MODE=Safe"
+set /p COPY_SECRETS=Копировать чувствительные данные, ключи, токены и авторизации? [д/Н]:
+if /I "%COPY_SECRETS%"=="д" set "SENSITIVITY_MODE=Full"
+if /I "%COPY_SECRETS%"=="да" set "SENSITIVITY_MODE=Full"
+if /I "%COPY_SECRETS%"=="y" set "SENSITIVITY_MODE=Full"
+if /I "%COPY_SECRETS%"=="yes" set "SENSITIVITY_MODE=Full"
+echo Режим чувствительных данных: %SENSITIVITY_MODE%
+echo.
 set "REFRESH_MODE=Auto"
 if not "%CODEXKIT_REFRESH_MODE%"=="" set "REFRESH_MODE=%CODEXKIT_REFRESH_MODE%"
 
 if "%ARCHIVE_PASSWORD%"=="" (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -RefreshMode "%REFRESH_MODE%"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -RefreshMode "%REFRESH_MODE%" -SensitivityMode "%SENSITIVITY_MODE%"
 ) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -ArchivePassword "%ARCHIVE_PASSWORD%" -RefreshMode "%REFRESH_MODE%"
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0refresh-codexkit.ps1" -ArchivePassword "%ARCHIVE_PASSWORD%" -RefreshMode "%REFRESH_MODE%" -SensitivityMode "%SENSITIVITY_MODE%"
 )
 
 set "EXITCODE=%ERRORLEVEL%"

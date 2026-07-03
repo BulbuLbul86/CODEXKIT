@@ -132,6 +132,77 @@ function Ensure-Dir {
     }
 }
 
+function Get-FileSha256 {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Test-TransferHashFile {
+    param(
+        [string]$HashFilePath,
+        [string]$BaseRoot,
+        [string[]]$ExpectedFiles
+    )
+
+    if (-not (Test-Path -LiteralPath $HashFilePath)) {
+        Write-Warning "Файл хэшей не найден: $HashFilePath. Продолжаю для совместимости со старым комплектом."
+        return
+    }
+
+    $expectedMap = @{}
+    foreach ($file in @($ExpectedFiles)) {
+        if ([string]::IsNullOrWhiteSpace($file)) {
+            continue
+        }
+
+        $fullPath = if ([System.IO.Path]::IsPathRooted($file)) { $file } else { Join-Path $BaseRoot $file }
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            $resolved = (Resolve-Path -LiteralPath $fullPath).Path
+            $expectedMap[$resolved.ToLowerInvariant()] = $true
+        }
+    }
+
+    $base = (Resolve-Path -LiteralPath $BaseRoot).Path
+    $lines = Get-Content -LiteralPath $HashFilePath -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($line in $lines) {
+        $line = ([string]$line).TrimStart([char]0xFEFF)
+        if ($line -notmatch '^(?<hash>[A-Fa-f0-9]{64})\s+\*?(?<path>.+)$') {
+            throw "Некорректная строка в файле хэшей ${HashFilePath}: $line"
+        }
+
+        $expectedHash = $Matches.hash.ToLowerInvariant()
+        $relativePath = $Matches.path.Trim()
+        $targetPath = Join-Path $base (($relativePath -replace '/', '\'))
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            throw "Файл из списка хэшей не найден: $relativePath"
+        }
+
+        $resolvedTarget = (Resolve-Path -LiteralPath $targetPath).Path
+        if ($expectedMap.Count -gt 0 -and -not $expectedMap.ContainsKey($resolvedTarget.ToLowerInvariant())) {
+            continue
+        }
+
+        $actualHash = Get-FileSha256 -Path $resolvedTarget
+        if ($actualHash -ne $expectedHash) {
+            throw "Хэш не совпал для ${relativePath}. Ожидалось: $expectedHash, получено: $actualHash"
+        }
+    }
+
+    Write-Host "Хэши проверены: $HashFilePath"
+}
+
 function Restore-LargeFilesIfNeeded {
     param([string]$Root)
 
@@ -174,6 +245,7 @@ $partsRoot = Join-Path $root "codexkit-transfer-parts"
 
 if (Test-Path -LiteralPath $singleArchive) {
     Write-Host "Распаковываю codexkit-transfer.zip"
+    Test-TransferHashFile -HashFilePath (Join-Path $root "codexkit-transfer.zip.sha256") -BaseRoot $root -ExpectedFiles @($singleArchive)
     Expand-Archive -LiteralPath $singleArchive -DestinationPath $outputRoot -Force
     Restore-LargeFilesIfNeeded -Root $outputRoot
     return
@@ -192,6 +264,9 @@ if ($parts.Count -eq 0) {
 
 foreach ($part in $parts) {
     Write-Host "Распаковываю $($part.Name)"
+    if ($part -eq $parts[0]) {
+        Test-TransferHashFile -HashFilePath (Join-Path $root "codexkit-transfer-parts.sha256") -BaseRoot $root -ExpectedFiles @($parts | ForEach-Object { $_.FullName })
+    }
     Expand-Archive -LiteralPath $part.FullName -DestinationPath $outputRoot -Force
 }
 Restore-LargeFilesIfNeeded -Root $outputRoot

@@ -6,7 +6,8 @@
     [switch]$SkipWinget,
     [switch]$SkipState,
     [switch]$SkipRepos,
-    [switch]$UseGitHubFallback
+    [switch]$UseGitHubFallback,
+    [switch]$PlanOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,6 +22,77 @@ function Ensure-Dir {
     if (-not (Test-Path -LiteralPath $Path)) {
         New-Item -ItemType Directory -Path $Path -Force | Out-Null
     }
+}
+
+function Get-FileSha256 {
+    param([string]$Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (($hashBytes | ForEach-Object { $_.ToString("x2") }) -join "")
+        } finally {
+            $sha256.Dispose()
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function Test-TransferHashFile {
+    param(
+        [string]$HashFilePath,
+        [string]$BaseRoot,
+        [string[]]$ExpectedFiles
+    )
+
+    if (-not (Test-Path -LiteralPath $HashFilePath)) {
+        Write-Warning "Файл хэшей не найден: $HashFilePath. Продолжаю для совместимости со старым комплектом."
+        return
+    }
+
+    $expectedMap = @{}
+    foreach ($file in @($ExpectedFiles)) {
+        if ([string]::IsNullOrWhiteSpace($file)) {
+            continue
+        }
+
+        $fullPath = if ([System.IO.Path]::IsPathRooted($file)) { $file } else { Join-Path $BaseRoot $file }
+        if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            $resolved = (Resolve-Path -LiteralPath $fullPath).Path
+            $expectedMap[$resolved.ToLowerInvariant()] = $true
+        }
+    }
+
+    $base = (Resolve-Path -LiteralPath $BaseRoot).Path
+    $lines = Get-Content -LiteralPath $HashFilePath -ErrorAction Stop | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    foreach ($line in $lines) {
+        $line = ([string]$line).TrimStart([char]0xFEFF)
+        if ($line -notmatch '^(?<hash>[A-Fa-f0-9]{64})\s+\*?(?<path>.+)$') {
+            throw "Некорректная строка в файле хэшей ${HashFilePath}: $line"
+        }
+
+        $expectedHash = $Matches.hash.ToLowerInvariant()
+        $relativePath = $Matches.path.Trim()
+        $targetPath = Join-Path $base (($relativePath -replace '/', '\'))
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            throw "Файл из списка хэшей не найден: $relativePath"
+        }
+
+        $resolvedTarget = (Resolve-Path -LiteralPath $targetPath).Path
+        if ($expectedMap.Count -gt 0 -and -not $expectedMap.ContainsKey($resolvedTarget.ToLowerInvariant())) {
+            continue
+        }
+
+        $actualHash = Get-FileSha256 -Path $resolvedTarget
+        if ($actualHash -ne $expectedHash) {
+            throw "Хэш не совпал для ${relativePath}. Ожидалось: $expectedHash, получено: $actualHash"
+        }
+    }
+
+    Write-Host "Хэши проверены: $HashFilePath" -ForegroundColor DarkGreen
 }
 
 function Restore-LargeTransferFilesIfNeeded {
@@ -70,6 +142,7 @@ function Expand-TransferPayloadIfNeeded {
     $singleArchive = Join-Path $KitRoot "codexkit-transfer.zip"
     if (Test-Path -LiteralPath $singleArchive) {
         Write-Step "Распаковка переносимого архива"
+        Test-TransferHashFile -HashFilePath (Join-Path $KitRoot "codexkit-transfer.zip.sha256") -BaseRoot $KitRoot -ExpectedFiles @($singleArchive)
         Expand-Archive -LiteralPath $singleArchive -DestinationPath $KitRoot -Force
         Restore-LargeTransferFilesIfNeeded -Root $KitRoot
         return
@@ -88,6 +161,7 @@ function Expand-TransferPayloadIfNeeded {
     }
 
     Write-Step "Распаковка разделённых частей переноса"
+    Test-TransferHashFile -HashFilePath (Join-Path $KitRoot "codexkit-transfer-parts.sha256") -BaseRoot $KitRoot -ExpectedFiles @($parts | ForEach-Object { $_.FullName })
     foreach ($part in $parts) {
         Write-Host "Распаковываю $($part.Name)"
         Expand-Archive -LiteralPath $part.FullName -DestinationPath $KitRoot -Force
@@ -446,6 +520,16 @@ function Save-RepoLocationState {
     $state | ConvertTo-Json -Depth 6 | Set-Content -Path $Path -Encoding UTF8
 }
 
+function Get-RepoStateKey {
+    param([pscustomobject]$Repo)
+
+    if (($Repo.PSObject.Properties.Name -contains "snapshot_id") -and -not [string]::IsNullOrWhiteSpace([string]$Repo.snapshot_id)) {
+        return [string]$Repo.snapshot_id
+    }
+
+    return [string]$Repo.name
+}
+
 function Get-CommonRepoSearchRoots {
     param(
         [string]$PreferredRoot,
@@ -545,6 +629,15 @@ function Resolve-RepoTargetPath {
         [hashtable]$RepoPathMap,
         [string]$PreferredRoot
     )
+
+    $repoKey = Get-RepoStateKey -Repo $Repo
+    if ($RepoPathMap.ContainsKey($repoKey)) {
+        $rememberedPath = [string]$RepoPathMap[$repoKey]
+        if (Test-Path -LiteralPath $rememberedPath) {
+            Write-Host "Использую запомненный путь для $($Repo.name): $rememberedPath"
+            return $rememberedPath
+        }
+    }
 
     if ($RepoPathMap.ContainsKey($Repo.name)) {
         $rememberedPath = [string]$RepoPathMap[$Repo.name]
@@ -955,6 +1048,125 @@ function Confirm-PackageInstall {
     }
 }
 
+function Get-PlanRepoTargetPath {
+    param(
+        [pscustomobject]$Repo,
+        [hashtable]$RepoPathMap,
+        [string]$PreferredRoot
+    )
+
+    $repoKey = Get-RepoStateKey -Repo $Repo
+    if ($RepoPathMap.ContainsKey($repoKey)) {
+        return [string]$RepoPathMap[$repoKey]
+    }
+
+    if ($RepoPathMap.ContainsKey($Repo.name)) {
+        return [string]$RepoPathMap[$Repo.name]
+    }
+
+    $defaultRoot = if (-not [string]::IsNullOrWhiteSpace($PreferredRoot)) { $PreferredRoot } else { Get-DefaultWorkspaceRoot }
+    return (Join-Path $defaultRoot $Repo.name)
+}
+
+function Write-RestorePlan {
+    param(
+        [string]$KitRoot,
+        [string]$StateManifestPath,
+        [string]$BootstrapPackagesPath,
+        [string]$RepoManifestPath,
+        [string]$ExtensionsPath,
+        [string]$RepoSnapshotsRoot,
+        [hashtable]$RepoLocationState,
+        [string]$WorkspaceRoot,
+        [string]$PrivateRestoreRoot,
+        [string]$ProgramsRoot,
+        [string]$BackupRoot
+    )
+
+    Write-Step "План восстановления"
+    Write-Host "PlanOnly включён: CODEXKIT ничего не копирует, не распаковывает, не устанавливает и не меняет PATH." -ForegroundColor Yellow
+    Write-Host "Папка программ: $ProgramsRoot"
+    Write-Host "Личные файлы:   $PrivateRestoreRoot"
+    Write-Host "Backup-папки:   $BackupRoot"
+
+    $singleArchive = Join-Path $KitRoot "codexkit-transfer.zip"
+    $partsRoot = Join-Path $KitRoot "codexkit-transfer-parts"
+    if ((Test-Path -LiteralPath $singleArchive) -or (Test-Path -LiteralPath $partsRoot)) {
+        Write-Host "Архив переноса найден, но в PlanOnly он не распаковывается." -ForegroundColor DarkYellow
+    }
+
+    if (Test-Path -LiteralPath $BootstrapPackagesPath) {
+        Write-Step "Приложения, которые будут предложены"
+        $packages = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $BootstrapPackagesPath -Raw | ConvertFrom-Json))
+        foreach ($package in $packages) {
+            $defaultText = if (Get-PackageInstallDefault -Package $package) { "по умолчанию: установить" } else { "по умолчанию: пропустить" }
+            Write-Host "- $(Get-PackageDisplayName -Package $package) ($($package.id)), $defaultText"
+        }
+    } else {
+        Write-Warning "bootstrap-packages.json не найден: список приложений недоступен."
+    }
+
+    if (Test-Path -LiteralPath $StateManifestPath) {
+        Write-Step "Элементы state, которые могут быть восстановлены"
+        $entries = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $StateManifestPath -Raw | ConvertFrom-Json) | Where-Object { $_.status -eq "copied" })
+        foreach ($entry in ($entries | Select-Object -First 200)) {
+            $destination = if (($entry.PSObject.Properties.Name -contains "restore_destination") -and -not [string]::IsNullOrWhiteSpace([string]$entry.restore_destination)) {
+                [string]$entry.restore_destination
+            } else {
+                [string]$entry.destination
+            }
+
+            $existsText = if (-not [string]::IsNullOrWhiteSpace($destination) -and (Test-Path -LiteralPath $destination)) { "перезапишет существующий путь" } else { "новый или отсутствующий путь" }
+            Write-Host "- $($entry.category): $destination ($existsText)"
+        }
+
+        if ($entries.Count -gt 200) {
+            Write-Host "...и ещё $($entries.Count - 200) элементов."
+        }
+    } else {
+        Write-Warning "state-manifest.json не найден: подробный план state недоступен без распаковки комплекта."
+    }
+
+    if (Test-Path -LiteralPath $RepoManifestPath) {
+        Write-Step "Репозитории"
+        $repos = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $RepoManifestPath -Raw | ConvertFrom-Json))
+        foreach ($repo in $repos) {
+            $targetPath = Get-PlanRepoTargetPath -Repo $repo -RepoPathMap $RepoLocationState -PreferredRoot $WorkspaceRoot
+            $snapshotPath = if (($repo.PSObject.Properties.Name -contains "snapshot_id") -and -not [string]::IsNullOrWhiteSpace([string]$repo.snapshot_id)) {
+                Join-Path $RepoSnapshotsRoot ([string]$repo.snapshot_id)
+            } else {
+                Join-Path $RepoSnapshotsRoot $repo.name
+            }
+            $snapshotText = if (Test-Path -LiteralPath $snapshotPath) { "локальный снимок найден" } else { "локального снимка нет" }
+            $targetText = if (Test-Path -LiteralPath $targetPath) { "цель существует, будет нужна резервная копия" } else { "цель отсутствует" }
+            Write-Host "- $($repo.name): $targetPath ($snapshotText; $targetText)"
+        }
+    } else {
+        Write-Warning "repo-manifest.json не найден: план репозиториев недоступен."
+    }
+
+    if (Test-Path -LiteralPath $ExtensionsPath) {
+        Write-Step "Расширения VS Code"
+        $extensions = @(Get-Content -LiteralPath $ExtensionsPath | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and -not $_.StartsWith("#") })
+        if ($extensions.Count -eq 0) {
+            Write-Host "Расширения не указаны."
+        } else {
+            foreach ($extension in ($extensions | Select-Object -First 120)) {
+                Write-Host "- $extension"
+            }
+            if ($extensions.Count -gt 120) {
+                Write-Host "...и ещё $($extensions.Count - 120) расширений."
+            }
+        }
+    } else {
+        Write-Warning "vscode-extensions.txt не найден: план расширений недоступен."
+    }
+}
+
+if ($MyInvocation.InvocationName -eq ".") {
+    return
+}
+
 $kitRoot = Split-Path -Parent $PSCommandPath
 $stateRoot = Join-Path $kitRoot "state"
 $zipPath = Join-Path $kitRoot "codexkit-state.zip"
@@ -973,6 +1185,22 @@ $repoLocationStatePath = Join-Path $travelKitStateDir "repo-locations.json"
 $repoLocationState = Get-RepoLocationState -Path $repoLocationStatePath
 $resolvedRepoPaths = @{}
 $codexBackupRoot = Join-Path $travelKitStateDir "backups\codex-home"
+
+if ($PlanOnly) {
+    Write-RestorePlan `
+        -KitRoot $kitRoot `
+        -StateManifestPath $stateManifestPath `
+        -BootstrapPackagesPath $bootstrapPackagesPath `
+        -RepoManifestPath $repoManifestPath `
+        -ExtensionsPath $extensionsPath `
+        -RepoSnapshotsRoot $repoSnapshotsRoot `
+        -RepoLocationState $repoLocationState `
+        -WorkspaceRoot $WorkspaceRoot `
+        -PrivateRestoreRoot $PrivateRestoreRoot `
+        -ProgramsRoot $ProgramsRoot `
+        -BackupRoot $travelKitStateDir
+    exit 0
+}
 
 Expand-TransferPayloadIfNeeded -KitRoot $kitRoot -StateRoot $stateRoot -StateZipPath $zipPath
 
@@ -1102,8 +1330,13 @@ if (-not $SkipRepos) {
         $repos = @(ConvertTo-FlatObjectArray -Value (Get-Content -LiteralPath $repoManifestPath -Raw | ConvertFrom-Json))
         foreach ($repo in $repos) {
             $targetPath = Resolve-RepoTargetPath -Repo $repo -RepoPathMap $repoLocationState -PreferredRoot $WorkspaceRoot
-            $resolvedRepoPaths[$repo.name] = $targetPath
-            $snapshotPath = Join-Path $repoSnapshotsRoot $repo.name
+            $repoKey = Get-RepoStateKey -Repo $repo
+            $resolvedRepoPaths[$repoKey] = $targetPath
+            $snapshotPath = if (($repo.PSObject.Properties.Name -contains "snapshot_id") -and -not [string]::IsNullOrWhiteSpace([string]$repo.snapshot_id)) {
+                Join-Path $repoSnapshotsRoot ([string]$repo.snapshot_id)
+            } else {
+                Join-Path $repoSnapshotsRoot $repo.name
+            }
 
             if (Test-Path -LiteralPath $snapshotPath) {
                 if (Test-Path -LiteralPath $targetPath) {

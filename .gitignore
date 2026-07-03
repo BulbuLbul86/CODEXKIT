@@ -1,4 +1,4 @@
-﻿state/
+state/
 repo-snapshots/
 docs/
 archive-hashes.txt
@@ -15,6 +15,7 @@ codexkit-state.zip
 codexkit-state.__new.zip
 codexkit-transfer.zip
 codexkit-transfer.__new.zip
+*.sha256
 codexkit-transfer-secure.rar
 codexkit-transfer-secure*.rar
 codexkit-transfer-parts/
