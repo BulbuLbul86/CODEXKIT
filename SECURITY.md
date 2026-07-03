@@ -8,6 +8,7 @@ CODEXKIT может копировать:
 
 - SSH-ключи и конфигурацию SSH;
 - токены, авторизации и локальное состояние Codex;
+- локальный `config.toml` Codex, если в нём есть приватные параметры или команды;
 - настройки package-manager-инструментов;
 - конфиги облачных CLI, VPN, Docker, Kubernetes и Android;
 - локальные репозитории, включая незапушенные изменения;
@@ -48,6 +49,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\prepublish-check.ps1
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\restore-codexkit.ps1 -PlanOnly
 ```
+
+Старые комплекты без новых manifest-полей и `.sha256` поддерживаются best-effort. Это нужно для совместимости, но не делает старый комплект доверенным источником.
 
 ## Если секреты случайно попали в Git
 

@@ -53,9 +53,10 @@ function Test-CodexKitDangerousTrackedPath {
 
     $blockedPatterns = @(
         '^codexkit-state.*\.zip$',
+        '^codexkit-state-secure.*\.rar$',
         '^codexkit-transfer.*\.zip$',
         '^codexkit-transfer-secure.*\.rar$',
-        '^codexkit-transfer.*\.sha256$'
+        '^.*\.sha256$'
     )
 
     foreach ($pattern in $blockedPatterns) {
@@ -129,7 +130,10 @@ function Invoke-CodexKitPrepublishCheck {
             "bootstrap-packages.json",
             "custom-paths.json",
             "SECURITY.md",
-            "PRIVACY.md"
+            "PRIVACY.md",
+            "CHANGELOG.md",
+            "CONTRIBUTING.md",
+            "RELEASE_NOTES_v0.1-alpha.md"
         )
 
         foreach ($file in $requiredFiles) {

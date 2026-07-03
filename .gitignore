@@ -11,12 +11,10 @@ vscode-extensions.txt
 winget-packages.json
 winget-export.log
 installers/
-codexkit-state.zip
-codexkit-state.__new.zip
-codexkit-transfer.zip
-codexkit-transfer.__new.zip
+codexkit-state*.zip
+codexkit-state-secure*.rar
+codexkit-transfer*.zip
 *.sha256
-codexkit-transfer-secure.rar
 codexkit-transfer-secure*.rar
 codexkit-transfer-parts/
 codexkit-run-statistics.latest.json

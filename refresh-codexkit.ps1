@@ -164,6 +164,7 @@ function Test-SensitiveCopyEntry {
         "\nuget\nuget.config",
         "\.m2\settings.xml",
         "\.gradle\gradle.properties",
+        "\.gradle\init.gradle",
         "\.docker",
         "\.kube",
         "\.aws",
@@ -203,6 +204,7 @@ function Test-SensitiveCodexFileName {
     param([string]$Name)
 
     $sensitiveNames = @(
+        "config.toml",
         "auth.json",
         "installation_id",
         ".codex-global-state.json",
