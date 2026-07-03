@@ -39,3 +39,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\prepublish-check.ps1
 - Для операций с файлами используй `-LiteralPath`, если путь пришёл из данных пользователя.
 - Не запускай установку программ и реальное восстановление в тестах.
 - Для опасных действий добавляй dry-run или plan-поведение, если это возможно.
+
+## Кодировка файлов
+
+PowerShell-скрипты с русским текстом должны сохраняться в кодировке, совместимой с Windows PowerShell 5.1.
+
+Для `.ps1` с кириллицей допускается UTF-8 with BOM. Это помогает Windows PowerShell 5.1 корректно читать русские строки и не ломать парсер после массового редактирования файлов.
+
+После массового редактирования обязательно запускай:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\prepublish-check.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\restore-codexkit.ps1 -PlanOnly
+Invoke-Pester .\tests
+```
