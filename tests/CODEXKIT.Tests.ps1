@@ -1,4 +1,4 @@
-﻿$repoRoot = Split-Path -Parent $PSScriptRoot
+$repoRoot = Split-Path -Parent $PSScriptRoot
 
 . (Join-Path $repoRoot "prepublish-check.ps1")
 . (Join-Path $repoRoot "refresh-codexkit.ps1")
@@ -14,10 +14,30 @@ Describe "CODEXKIT prepublish" {
         Test-CodexKitDangerousTrackedPath -Path "archive-hashes.txt" | Should Be $true
     }
 
+    It "видит локальные тестовые, логовые и cache-артефакты" {
+        Test-CodexKitDangerousTrackedPath -Path "TestResults/run.trx" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "test-results/pester.xml" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "coverage/index.html" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path ".pytest_cache/v/cache/nodeids" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "logs/local-run.log" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "cache/state.bin" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "exports/report.csv" | Should Be $true
+    }
+
+    It "видит секреты и локальные окружения" {
+        Test-CodexKitDangerousTrackedPath -Path ".env" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path ".env.local" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "private.key" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "cert.pem" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "local.sqlite" | Should Be $true
+        Test-CodexKitDangerousTrackedPath -Path "Pester.TestResults.xml" | Should Be $true
+    }
+
     It "не блокирует обычные файлы шаблона" {
         Test-CodexKitDangerousTrackedPath -Path "README.md" | Should Be $false
         Test-CodexKitDangerousTrackedPath -Path "refresh-codexkit.ps1" | Should Be $false
         Test-CodexKitDangerousTrackedPath -Path "bootstrap-packages.json" | Should Be $false
+        Test-CodexKitDangerousTrackedPath -Path "tests/CODEXKIT.Tests.ps1" | Should Be $false
     }
 
     It "проверяет пустой custom-paths.json" {
@@ -62,7 +82,7 @@ Describe "CODEXKIT sensitivity modes" {
     }
 
     It "оставляет custom-paths явным пользовательским механизмом" {
-        Test-CustomCopyEntry -Entry @{ Category = "custom"; Source = "C:\Secrets\.ssh"; Destination = "state\custom"; IsCustom = $true } | Should Be $true
+        Test-CustomCopyEntry -Entry @{ Category = "custom"; Source = "C:\Example\Config"; Destination = "state\custom"; IsCustom = $true } | Should Be $true
     }
 }
 
