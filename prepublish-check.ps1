@@ -66,7 +66,19 @@ function Test-CodexKitDangerousTrackedPath {
     }
 
     $blockedPatterns = @(
-        '^\.env\..+$',
+        '(^|/)\.env\..+$',
+        '(^|/)\.coverage$',
+        '(^|/)Pester\.TestResults\.xml$',
+        '(^|/)\.pytest_cache/',
+        '(^|/)__pycache__/',
+        '(^|/)TestResults/',
+        '(^|/)test-results/',
+        '(^|/)coverage/',
+        '(^|/)logs/',
+        '(^|/)cache/',
+        '(^|/)exports/',
+        '(^|/)\.venv/',
+        '(^|/)venv/',
         '^codexkit-state.*\.zip$',
         '^codexkit-state-secure.*\.rar$',
         '^codexkit-transfer.*\.zip$',
