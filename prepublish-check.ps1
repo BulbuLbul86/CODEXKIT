@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$RepositoryRoot = (Split-Path -Parent $PSCommandPath)
 )
 
@@ -22,7 +22,18 @@ function Test-CodexKitDangerousTrackedPath {
         "installers/",
         "codexkit-transfer-parts/",
         "CODEXKIT/",
-        "CODEXKIT-unpacked/"
+        "CODEXKIT-unpacked/",
+        ".serena/",
+        ".pytest_cache/",
+        "__pycache__/",
+        "TestResults/",
+        "test-results/",
+        "coverage/",
+        "logs/",
+        "cache/",
+        "exports/",
+        ".venv/",
+        "venv/"
     )
 
     foreach ($prefix in $blockedPrefixes) {
@@ -42,7 +53,10 @@ function Test-CodexKitDangerousTrackedPath {
         "winget-packages.json",
         "winget-export.log",
         "codexkit-run-statistics.latest.json",
-        "codexkit-run-statistics.latest.log"
+        "codexkit-run-statistics.latest.log",
+        ".env",
+        ".coverage",
+        "Pester.TestResults.xml"
     )
 
     foreach ($file in $blockedFiles) {
@@ -52,11 +66,23 @@ function Test-CodexKitDangerousTrackedPath {
     }
 
     $blockedPatterns = @(
+        '^\.env\..+$',
         '^codexkit-state.*\.zip$',
         '^codexkit-state-secure.*\.rar$',
         '^codexkit-transfer.*\.zip$',
         '^codexkit-transfer-secure.*\.rar$',
-        '^.*\.sha256$'
+        '^.*\.sha256$',
+        '^.*\.log$',
+        '^.*\.trx$',
+        '^.*\.key$',
+        '^.*\.pem$',
+        '^.*\.p12$',
+        '^.*\.pfx$',
+        '^.*\.sqlite$',
+        '^.*\.sqlite-shm$',
+        '^.*\.sqlite-wal$',
+        '^.*\.db$',
+        '^.*\.pyc$'
     )
 
     foreach ($pattern in $blockedPatterns) {
@@ -112,7 +138,7 @@ function Invoke-CodexKitPrepublishCheck {
             } else {
                 foreach ($file in $trackedFiles) {
                     if (Test-CodexKitDangerousTrackedPath -Path $file) {
-                        $failures.Add("В Git отслеживается приватный или generated-файл: $file") | Out-Null
+                        $failures.Add("В Git отслеживается приватный, локальный или generated-файл: $file") | Out-Null
                     }
                 }
             }
